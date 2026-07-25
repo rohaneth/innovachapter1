@@ -4,11 +4,21 @@ from pydantic import BaseModel
 from pathlib import Path
 import os
 import shutil
+import logging
+import urllib.request
+import json
+import smtplib
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
 from groq import Groq
 from datetime import datetime
 from dotenv import load_dotenv
 
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Meeting Transcription App")
 
@@ -35,9 +45,13 @@ class OwnerDeadlineRequest(BaseModel):
     transcript: str
 
 
-
-
-# API Routes
+class ReminderRequest(BaseModel):
+    email: str
+    task: str
+    owner: str
+    priority: str
+    status: str
+    deadline: str# API Routes
 @app.post("/api/upload-video")
 async def upload_video(file: UploadFile = File(...), title: str = Form("")):
     # Create uploads directory if it doesn't exist
@@ -236,6 +250,292 @@ Meeting Transcript:
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/send-reminder")
+async def send_reminder(request: ReminderRequest):
+    # 1. Validate fields
+    if not request.email or "@" not in request.email or "." not in request.email:
+        raise HTTPException(status_code=400, detail="Invalid email format")
+    if not request.task.strip():
+        raise HTTPException(status_code=400, detail="Task description cannot be empty")
+    if not request.owner.strip():
+        raise HTTPException(status_code=400, detail="Owner name cannot be empty")
+    
+    # 2. Compose professional email contents
+    subject = f"Meeting Action Item Reminder: {request.task[:50]}" + ("..." if len(request.task) > 50 else "")
+    
+    priority_lower = request.priority.strip().lower()
+    status_lower = request.status.strip().lower()
+    
+    html_content = f"""<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <style>
+        body {{
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #f4f5f7;
+            color: #333333;
+            margin: 0;
+            padding: 20px;
+        }}
+        .container {{
+            max-width: 600px;
+            background: #ffffff;
+            margin: 0 auto;
+            border-radius: 8px;
+            overflow: hidden;
+            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.05);
+            border: 1px solid #e1e4e8;
+        }}
+        .header {{
+            background: linear-gradient(135deg, #4f46e5, #06b6d4);
+            color: #ffffff;
+            padding: 30px 20px;
+            text-align: center;
+        }}
+        .header h1 {{
+            margin: 0;
+            font-size: 24px;
+            font-weight: 600;
+            letter-spacing: -0.5px;
+        }}
+        .content {{
+            padding: 30px 25px;
+        }}
+        .greeting {{
+            font-size: 16px;
+            margin-bottom: 20px;
+            line-height: 1.5;
+        }}
+        .task-card {{
+            background-color: #f9fafb;
+            border-left: 4px solid #4f46e5;
+            padding: 20px;
+            border-radius: 4px;
+            margin-bottom: 25px;
+        }}
+        .task-title {{
+            font-size: 18px;
+            font-weight: 700;
+            margin-top: 0;
+            margin-bottom: 15px;
+            color: #111827;
+        }}
+        .task-details {{
+            border-collapse: collapse;
+            width: 100%;
+        }}
+        .task-details td {{
+            padding: 6px 0;
+            font-size: 14px;
+            vertical-align: top;
+        }}
+        .label {{
+            color: #6b7280;
+            font-weight: 600;
+            width: 120px;
+        }}
+        .value {{
+            color: #1f2937;
+        }}
+        .badge {{
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 600;
+            text-transform: capitalize;
+        }}
+        .badge-high {{ background-color: #fee2e2; color: #991b1b; }}
+        .badge-medium {{ background-color: #fef3c7; color: #92400e; }}
+        .badge-low {{ background-color: #e0f2fe; color: #075985; }}
+        .badge-pending {{ background-color: #ffedd5; color: #9a3412; }}
+        .badge-completed {{ background-color: #d1fae5; color: #065f46; }}
+        
+        .footer {{
+            background-color: #f9fafb;
+            padding: 20px;
+            text-align: center;
+            font-size: 12px;
+            color: #9ca3af;
+            border-top: 1px solid #e5e7eb;
+        }}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Action Item Reminder</h1>
+        </div>
+        <div class="content">
+            <div class="greeting">
+                Hello <strong>{request.owner}</strong>,<br><br>
+                This is a reminder regarding an action item assigned to you. Please see the task details below:
+            </div>
+            <div class="task-card">
+                <div class="task-title">{request.task}</div>
+                <table class="task-details">
+                    <tr>
+                        <td class="label">Priority:</td>
+                        <td class="value">
+                            <span class="badge badge-{priority_lower}">{request.priority}</span>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td class="label">Status:</td>
+                        <td class="value">
+                            <span class="badge badge-{status_lower}">{request.status}</span>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td class="label">Deadline:</td>
+                        <td class="value"><strong>{request.deadline}</strong></td>
+                    </tr>
+                </table>
+            </div>
+            <div class="greeting">
+                If you have completed this task, please update the status in the Meeting Transcription dashboard.
+            </div>
+        </div>
+        <div class="footer">
+            This is an automated email notification from the Meeting Transcription App. Please do not reply directly to this email.
+        </div>
+    </div>
+</body>
+</html>
+"""
+
+    text_content = (
+        f"Hello {request.owner},\n\n"
+        f"This is a reminder regarding an action item assigned to you.\n\n"
+        f"Task: {request.task}\n"
+        f"Priority: {request.priority}\n"
+        f"Status: {request.status}\n"
+        f"Deadline: {request.deadline}\n\n"
+        f"Please update the status in the dashboard once completed.\n"
+    )
+
+    # 3. Email dispatch configuration checks
+    sendgrid_key = os.getenv("SENDGRID_API_KEY")
+    sendgrid_from = os.getenv("SENDGRID_FROM_EMAIL")
+    
+    smtp_server = os.getenv("SMTP_SERVER")
+    smtp_port_str = os.getenv("SMTP_PORT")
+    smtp_username = os.getenv("SMTP_USERNAME")
+    smtp_password = os.getenv("SMTP_PASSWORD")
+    sender_email = os.getenv("SMTP_SENDER") or smtp_username
+
+    email_sent = False
+    errors = []
+
+    # SendGrid Web API Execution path
+    if sendgrid_key and sendgrid_from:
+        logger.info("Attempting to send email via SendGrid Web API...")
+        try:
+            url = "https://api.sendgrid.com/v3/mail/send"
+            headers = {
+                "Authorization": f"Bearer {sendgrid_key}",
+                "Content-Type": "application/json"
+            }
+            payload = {
+                "personalizations": [
+                    {
+                        "to": [{"email": request.email}],
+                        "subject": subject
+                    }
+                ],
+                "from": {"email": sendgrid_from},
+                "content": [
+                    {
+                        "type": "text/html",
+                        "value": html_content
+                    },
+                    {
+                        "type": "text/plain",
+                        "value": text_content
+                    }
+                ]
+            }
+            req = urllib.request.Request(
+                url,
+                data=json.dumps(payload).encode("utf-8"),
+                headers=headers,
+                method="POST"
+            )
+            with urllib.request.urlopen(req) as response:
+                if response.status in (200, 201, 202):
+                    email_sent = True
+                    logger.info(f"Email successfully sent to {request.email} via SendGrid API.")
+                else:
+                    err_msg = f"SendGrid API responded with status: {response.status}"
+                    errors.append(err_msg)
+                    logger.error(err_msg)
+        except Exception as e:
+            err_msg = f"SendGrid API exception: {str(e)}"
+            errors.append(err_msg)
+            logger.error(err_msg)
+
+    # SMTP Execution path (either as primary or fallback if SendGrid fails/not configured)
+    if not email_sent:
+        if smtp_server and smtp_username and smtp_password:
+            logger.info("Attempting to send email via SMTP...")
+            try:
+                try:
+                    smtp_port = int(smtp_port_str) if smtp_port_str else 587
+                except ValueError:
+                    smtp_port = 587
+                
+                msg = MIMEMultipart("alternative")
+                msg["Subject"] = subject
+                msg["From"] = sender_email
+                msg["To"] = request.email
+                
+                part1 = MIMEText(text_content, "plain")
+                part2 = MIMEText(html_content, "html")
+                msg.attach(part1)
+                msg.attach(part2)
+                
+                if smtp_port == 465:
+                    server = smtplib.SMTP_SSL(smtp_server, smtp_port, timeout=10)
+                else:
+                    server = smtplib.SMTP(smtp_server, smtp_port, timeout=10)
+                    server.starttls()
+                    
+                server.login(smtp_username, smtp_password)
+                server.sendmail(sender_email, request.email, msg.as_string())
+                server.quit()
+                
+                email_sent = True
+                logger.info(f"Email successfully sent to {request.email} via SMTP.")
+            except Exception as e:
+                err_msg = f"SMTP exception: {str(e)}"
+                errors.append(err_msg)
+                logger.error(err_msg)
+        else:
+            if not sendgrid_key:
+                err_msg = "No email credentials configured. Please set SENDGRID_API_KEY or SMTP_SERVER/SMTP_USERNAME/SMTP_PASSWORD in your .env file."
+                errors.append(err_msg)
+                logger.error(err_msg)
+
+    # 4. Return success or failure response
+    if email_sent:
+        return {"success": True, "message": f"Reminder email successfully sent to {request.email}"}
+    else:
+        # Logging email content to terminal for development/debugging purposes
+        logger.info("--- FAILED EMAIL LOG (Simulated output due to missing configuration) ---")
+        logger.info(f"To: {request.email}")
+        logger.info(f"Subject: {subject}")
+        logger.info(f"Body:\n{text_content}")
+        logger.info("---------------------------------------------------------------------")
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "message": "Failed to send email. Ensure the server has valid email configuration.",
+                "errors": errors
+            }
+        )
 
 
 
