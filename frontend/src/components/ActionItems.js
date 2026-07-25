@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Clock, Bell, X, Check, AlertCircle, RefreshCw, CheckSquare } from 'lucide-react';
+import { Clock, Bell, X, Check, AlertCircle, RefreshCw, CheckSquare, Mail, ArrowLeft } from 'lucide-react';
 
 const API_URL = process.env.REACT_APP_API_URL || (window.location.port === '3000' ? 'http://localhost:8000' : window.location.origin);
 
@@ -59,6 +59,10 @@ const ActionItems = ({ meeting, onUpdateMeeting }) => {
   const [error, setError] = useState(null);
 
   const [openMenuIndex, setOpenMenuIndex] = useState(null);
+  const [menuMode, setMenuMode] = useState('select');
+  const [emailAddress, setEmailAddress] = useState('');
+  const [emailSending, setEmailSending] = useState(false);
+  const [emailStatus, setEmailStatus] = useState(null);
   const [customMode, setCustomMode] = useState(false);
   const [customDuration, setCustomDuration] = useState({ value: '5', unit: 'min' });
   const [now, setNow] = useState(Date.now());
@@ -253,8 +257,56 @@ const ActionItems = ({ meeting, onUpdateMeeting }) => {
 
   const handleOpenMenu = (index) => {
     setOpenMenuIndex(index);
+    setMenuMode('select');
+    setEmailAddress('');
+    setEmailStatus(null);
+    setEmailSending(false);
     setCustomMode(false);
     setCustomDuration({ value: '5', unit: 'min' });
+  };
+
+  const handleSendEmailReminder = async (item) => {
+    if (!emailAddress || !emailAddress.includes('@')) {
+      setEmailStatus({ success: false, message: 'Please enter a valid email address.' });
+      return;
+    }
+
+    setEmailSending(true);
+    setEmailStatus(null);
+
+    try {
+      const response = await fetch(`${API_URL}/api/send-reminder`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          email: emailAddress,
+          task: item.task,
+          owner: item.owner,
+          priority: item.priority,
+          status: item.status,
+          deadline: item.deadline
+        })
+      });
+
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.detail?.message || data.detail || 'Failed to send email');
+      }
+
+      setEmailStatus({ success: true, message: 'Email sent successfully!' });
+      setTimeout(() => {
+        setOpenMenuIndex(null);
+        setEmailStatus(null);
+        setEmailAddress('');
+      }, 2000);
+
+    } catch (err) {
+      setEmailStatus({ success: false, message: err.message || 'Error sending email' });
+    } finally {
+      setEmailSending(false);
+    }
   };
 
   const getPriorityBadgeClass = (priority) => {
@@ -324,87 +376,180 @@ const ActionItems = ({ meeting, onUpdateMeeting }) => {
     return (
       <div className="relative">
         {openMenuIndex === index ? (
-          <div className="absolute left-0 bottom-full mb-1 z-10 bg-white border border-gray-200 rounded-lg shadow-lg p-2 flex items-center gap-1 min-w-[190px]">
-            {customMode ? (
-              <div className="flex items-center gap-1 w-full justify-between">
-                <input
-                  type="number"
-                  min="1"
-                  value={customDuration.value}
-                  onChange={(e) => setCustomDuration({ ...customDuration, value: e.target.value })}
-                  className="w-10 px-1 py-0.5 border border-gray-300 rounded text-xs text-center focus:ring-1 focus:ring-blue-500 outline-none"
-                />
-                <select
-                  value={customDuration.unit}
-                  onChange={(e) => setCustomDuration({ ...customDuration, unit: e.target.value })}
-                  className="border border-gray-300 rounded text-[11px] px-1 py-0.5 bg-white focus:ring-1 focus:ring-blue-500 outline-none"
-                >
-                  <option value="sec">sec</option>
-                  <option value="min">min</option>
-                </select>
+          <div className="absolute left-0 bottom-full mb-1 z-10 bg-white border border-gray-200 rounded-lg shadow-lg p-2.5 flex flex-col gap-2 min-w-[200px]">
+            {menuMode === 'select' && (
+              <div className="flex flex-col gap-1.5 w-full">
+                <p className="text-[11px] font-semibold text-gray-500 px-1">Select Reminder Type</p>
                 <button
-                  onClick={() => {
-                    const val = parseInt(customDuration.value, 10);
-                    if (isNaN(val) || val <= 0) return;
-                    const secs = customDuration.unit === 'sec' ? val : val * 60;
-                    startTimer(index, secs);
-                    setOpenMenuIndex(null);
-                  }}
-                  className="p-1 bg-green-50 text-green-700 hover:bg-green-100 rounded border border-green-200 cursor-pointer"
-                  title="Start"
+                  onClick={() => { setMenuMode('timer'); setCustomMode(false); }}
+                  className="flex items-center gap-2 w-full px-2 py-1.5 text-left text-xs text-gray-700 hover:bg-blue-50 hover:text-blue-600 rounded-md transition-colors cursor-pointer font-medium"
                 >
-                  <Check className="w-3 h-3" />
+                  <Clock className="w-3.5 h-3.5 text-blue-500" />
+                  Local Timer
                 </button>
                 <button
-                  onClick={() => setCustomMode(false)}
-                  className="p-1 bg-gray-50 text-gray-500 hover:bg-gray-100 rounded border border-gray-200 cursor-pointer"
-                  title="Back"
+                  onClick={() => { setMenuMode('email'); setEmailStatus(null); setEmailAddress(''); }}
+                  className="flex items-center gap-2 w-full px-2 py-1.5 text-left text-xs text-gray-700 hover:bg-blue-50 hover:text-blue-600 rounded-md transition-colors cursor-pointer font-medium"
                 >
-                  <X className="w-3 h-3" />
+                  <Mail className="w-3.5 h-3.5 text-blue-500" />
+                  Email Owner
                 </button>
-              </div>
-            ) : (
-              <div className="flex items-center gap-1 w-full justify-between">
-                <button
-                  onClick={() => { startTimer(index, 30); setOpenMenuIndex(null); }}
-                  className="px-1.5 py-0.5 text-[10px] font-medium bg-white hover:bg-blue-50 hover:text-blue-600 rounded border border-gray-200 transition-colors cursor-pointer"
-                >
-                  30s
-                </button>
-                <button
-                  onClick={() => { startTimer(index, 60); setOpenMenuIndex(null); }}
-                  className="px-1.5 py-0.5 text-[10px] font-medium bg-white hover:bg-blue-50 hover:text-blue-600 rounded border border-gray-200 transition-colors cursor-pointer"
-                >
-                  1m
-                </button>
-                <button
-                  onClick={() => { startTimer(index, 300); setOpenMenuIndex(null); }}
-                  className="px-1.5 py-0.5 text-[10px] font-medium bg-white hover:bg-blue-50 hover:text-blue-600 rounded border border-gray-200 transition-colors cursor-pointer"
-                >
-                  5m
-                </button>
-                <button
-                  onClick={() => setCustomMode(true)}
-                  className="px-1.5 py-0.5 text-[10px] font-medium bg-blue-50 text-blue-600 hover:bg-blue-100 rounded border border-blue-100 transition-colors cursor-pointer"
-                >
-                  Custom
-                </button>
+                <div className="border-t border-gray-100 my-0.5"></div>
                 <button
                   onClick={() => setOpenMenuIndex(null)}
-                  className="p-0.5 text-gray-400 hover:text-gray-600 rounded cursor-pointer"
+                  className="flex items-center justify-center gap-1.5 w-full px-2 py-1 text-xs text-gray-400 hover:text-gray-600 transition-colors cursor-pointer font-semibold"
                 >
-                  <X className="w-3 h-3" />
+                  <X className="w-3.5 h-3.5" />
+                  Cancel
                 </button>
+              </div>
+            )}
+
+            {menuMode === 'timer' && (
+              customMode ? (
+                <div className="flex items-center gap-1 w-full justify-between">
+                  <input
+                    type="number"
+                    min="1"
+                    value={customDuration.value}
+                    onChange={(e) => setCustomDuration({ ...customDuration, value: e.target.value })}
+                    className="w-10 px-1 py-0.5 border border-gray-300 rounded text-xs text-center focus:ring-1 focus:ring-blue-500 outline-none font-medium"
+                  />
+                  <select
+                    value={customDuration.unit}
+                    onChange={(e) => setCustomDuration({ ...customDuration, unit: e.target.value })}
+                    className="border border-gray-300 rounded text-[11px] px-1 py-0.5 bg-white focus:ring-1 focus:ring-blue-500 outline-none font-medium"
+                  >
+                    <option value="sec">sec</option>
+                    <option value="min">min</option>
+                  </select>
+                  <button
+                    onClick={() => {
+                      const val = parseInt(customDuration.value, 10);
+                      if (isNaN(val) || val <= 0) return;
+                      const secs = customDuration.unit === 'sec' ? val : val * 60;
+                      startTimer(index, secs);
+                      setOpenMenuIndex(null);
+                    }}
+                    className="p-1 bg-green-50 text-green-700 hover:bg-green-100 rounded border border-green-200 cursor-pointer"
+                    title="Start"
+                  >
+                    <Check className="w-3 h-3" />
+                  </button>
+                  <button
+                    onClick={() => setCustomMode(false)}
+                    className="p-1 bg-gray-50 text-gray-500 hover:bg-gray-100 rounded border border-gray-200 cursor-pointer"
+                    title="Back"
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                </div>
+              ) : (
+                <div className="flex items-center gap-1 w-full justify-between">
+                  <button
+                    onClick={() => { setMenuMode('select'); }}
+                    className="p-1 hover:bg-gray-100 rounded text-gray-500 cursor-pointer mr-0.5"
+                    title="Back"
+                  >
+                    <ArrowLeft className="w-3.5 h-3.5" />
+                  </button>
+                  <button
+                    onClick={() => { startTimer(index, 30); setOpenMenuIndex(null); }}
+                    className="px-1.5 py-0.5 text-[10px] font-medium bg-white hover:bg-blue-50 hover:text-blue-600 rounded border border-gray-200 transition-colors cursor-pointer"
+                  >
+                    30s
+                  </button>
+                  <button
+                    onClick={() => { startTimer(index, 60); setOpenMenuIndex(null); }}
+                    className="px-1.5 py-0.5 text-[10px] font-medium bg-white hover:bg-blue-50 hover:text-blue-600 rounded border border-gray-200 transition-colors cursor-pointer"
+                  >
+                    1m
+                  </button>
+                  <button
+                    onClick={() => { startTimer(index, 300); setOpenMenuIndex(null); }}
+                    className="px-1.5 py-0.5 text-[10px] font-medium bg-white hover:bg-blue-50 hover:text-blue-600 rounded border border-gray-200 transition-colors cursor-pointer"
+                  >
+                    5m
+                  </button>
+                  <button
+                    onClick={() => setCustomMode(true)}
+                    className="px-1.5 py-0.5 text-[10px] font-medium bg-blue-50 text-blue-600 hover:bg-blue-100 rounded border border-blue-100 transition-colors cursor-pointer"
+                  >
+                    Custom
+                  </button>
+                  <button
+                    onClick={() => setOpenMenuIndex(null)}
+                    className="p-0.5 text-gray-400 hover:text-gray-600 rounded cursor-pointer"
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                </div>
+              )
+            )}
+
+            {menuMode === 'email' && (
+              <div className="flex flex-col gap-1.5 w-full">
+                <div className="flex items-center gap-1.5">
+                  <button
+                    onClick={() => { setMenuMode('select'); }}
+                    className="p-1 hover:bg-gray-100 rounded text-gray-500 cursor-pointer"
+                    title="Back"
+                    disabled={emailSending}
+                  >
+                    <ArrowLeft className="w-3.5 h-3.5" />
+                  </button>
+                  <span className="text-[11px] font-semibold text-gray-500">Email Reminder</span>
+                </div>
+                
+                {emailStatus ? (
+                  <div className={`p-1.5 rounded text-[11px] font-medium border ${
+                    emailStatus.success 
+                      ? 'bg-green-50 border-green-100 text-green-700' 
+                      : 'bg-red-50 border-red-100 text-red-700'
+                  }`}>
+                    {emailStatus.message}
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-1 w-full">
+                    <input
+                      type="email"
+                      placeholder="owner@example.com"
+                      value={emailAddress}
+                      onChange={(e) => setEmailAddress(e.target.value)}
+                      className="flex-1 w-0 px-2 py-1 border border-gray-300 rounded text-xs focus:ring-1 focus:ring-blue-500 outline-none font-medium"
+                      disabled={emailSending}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') handleSendEmailReminder(item);
+                      }}
+                    />
+                    <button
+                      onClick={() => handleSendEmailReminder(item)}
+                      className={`p-1 rounded cursor-pointer ${
+                        emailSending 
+                          ? 'bg-gray-50 text-gray-400' 
+                          : 'bg-blue-50 text-blue-600 hover:bg-blue-100 border border-blue-100'
+                      }`}
+                      title="Send Email"
+                      disabled={emailSending}
+                    >
+                      {emailSending ? (
+                        <div className="w-3.5 h-3.5 border-2 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
+                      ) : (
+                        <Check className="w-3.5 h-3.5" />
+                      )}
+                    </button>
+                  </div>
+                )}
               </div>
             )}
           </div>
         ) : null}
         <button
-          onClick={() => handleOpenMenu(index)}
+          onClick={() => { handleOpenMenu(index); setMenuMode('select'); }}
           className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-semibold text-blue-600 hover:text-blue-800 bg-blue-50 hover:bg-blue-100 border border-blue-100 rounded-md transition-all cursor-pointer"
         >
-          <Clock className="w-3.5 h-3.5" />
-          Set Timer
+          <Bell className="w-3.5 h-3.5" />
+          Remind
         </button>
       </div>
     );

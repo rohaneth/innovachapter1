@@ -15,6 +15,16 @@ if env_path.exists():
 
 app = FastAPI(title="Meeting Transcription App")
 
+# =========================================================================
+# FUTURE PRODUCTION SCALABILITY NOTE:
+# Currently, this application uses a stateless backend architecture with
+# client-side persistence (localStorage) to store meetings and action items.
+# For production scale, a database layer (e.g., MongoDB/Document Store for 
+# transcripts/chats or PostgreSQL for relational action items) should be
+# integrated here using ORM like SQLAlchemy or motor client.
+# APIs are designed to be easily extensible to fetch from/save to a DB.
+# =========================================================================
+
 # CORS middleware
 app.add_middleware(
     CORSMiddleware,

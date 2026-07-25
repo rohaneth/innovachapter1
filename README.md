@@ -38,8 +38,20 @@ A full-stack application for meeting video transcription, AI-powered chat, and a
 Create a `.env` file in the root directory:
 
 ```bash
+# Groq API Configuration
 GROQ_API_KEY=your_groq_api_key_here
 REACT_APP_API_URL=http://localhost:8000
+
+# Optional: Email Reminder Configuration (SendGrid)
+SENDGRID_API_KEY=your_sendgrid_key
+SENDGRID_FROM_EMAIL=sender@yourdomain.com
+
+# Optional: Email Reminder Configuration (SMTP fallback)
+SMTP_SERVER=smtp.gmail.com
+SMTP_PORT=587
+SMTP_USERNAME=your_email@gmail.com
+SMTP_PASSWORD=your_app_password
+SMTP_SENDER=your_email@gmail.com
 ```
 
 ### 2. Deploy with one command
@@ -175,12 +187,15 @@ freshinnova/
 
 For production deployment:
 
-1. Update environment variables in production
-2. Enable HTTPS
-3. Configure nginx for production
-4. Add authentication/authorization
-5. Consider implementing a backend database for persistent storage
-6. Set up backup/recovery for localStorage data if needed
+1. **Update environment variables in production:** Ensure Groq, SendGrid/SMTP credentials are fully configured.
+2. **Enable HTTPS:** Secures authentication headers and data transit.
+3. **Configure nginx for production:** If self-hosting using Docker.
+4. **Add authentication/authorization:** Restrict access to authorized meeting members.
+5. **Consider database persistence:** Port local storage to standard PostgreSQL/MongoDB databases.
+6. **Vercel Serverless Function Deployment:** 
+   - The project is fully pre-configured to run out of the box on Vercel. 
+   - The frontend uses `/api/index.py` serverless functions for zero-configuration backend scalability, automatically routed via `frontend/vercel.json`.
+   - Setup project on Vercel and attach your environment variables to host instantly.
 
 ## License
 

@@ -23,6 +23,16 @@ logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Meeting Transcription App")
 
+# =========================================================================
+# FUTURE PRODUCTION SCALABILITY NOTE:
+# Currently, this application uses a stateless backend architecture with
+# client-side persistence (localStorage) to store meetings and action items.
+# For production scale, a database layer (e.g., MongoDB/Document Store for 
+# transcripts/chats or PostgreSQL for relational action items) should be
+# integrated here using ORM like SQLAlchemy or motor client.
+# APIs are designed to be easily extensible to fetch from/save to a DB.
+# =========================================================================
+
 # CORS middleware
 app.add_middleware(
     CORSMiddleware,
@@ -118,6 +128,11 @@ async def upload_video(file: UploadFile = File(...), title: str = Form("")):
             "created_at": datetime.now().isoformat()
         }
     except Exception as e:
+        if os.path.exists(file_path):
+            try:
+                os.remove(file_path)
+            except Exception as cleanup_err:
+                logger.error(f"Failed to delete file {file_path} during error cleanup: {cleanup_err}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

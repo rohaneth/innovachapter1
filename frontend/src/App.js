@@ -125,6 +125,7 @@ function App() {
           <Dashboard 
             meetings={meetings} 
             onMeetingSelect={handleMeetingSelect}
+            onUploadClick={() => setActiveTab('upload')}
           />
         )}
         {activeTab === 'upload' && (

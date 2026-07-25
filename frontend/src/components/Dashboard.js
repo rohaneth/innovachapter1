@@ -2,7 +2,7 @@ import React from 'react';
 import { Calendar, Clock, User, TrendingUp, CheckCircle, Circle } from 'lucide-react';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from 'recharts';
 
-const Dashboard = ({ meetings, onMeetingSelect }) => {
+const Dashboard = ({ meetings, onMeetingSelect, onUploadClick }) => {
   // Flatten all action items from all meetings (each meeting has actionItems array)
   const allActionItems = meetings.flatMap(meeting => meeting.actionItems || []);
 
@@ -147,7 +147,17 @@ const Dashboard = ({ meetings, onMeetingSelect }) => {
       <div className="bg-white rounded-xl shadow-sm p-6 border border-gray-200">
         <h2 className="text-lg font-semibold text-gray-900 mb-4">Recent Meetings</h2>
         {meetings.length === 0 ? (
-          <p className="text-gray-500 text-center py-8">No meetings yet. Upload a video to get started!</p>
+          <div className="text-center py-10 flex flex-col items-center">
+            <p className="text-gray-500 mb-4 font-semibold text-sm">No meetings yet. Upload a video to get started!</p>
+            {onUploadClick && (
+              <button
+                onClick={onUploadClick}
+                className="inline-flex items-center px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-semibold text-sm rounded-lg shadow-sm transition-all cursor-pointer"
+              >
+                Upload Meeting Video
+              </button>
+            )}
+          </div>
         ) : (
           <div className="space-y-3">
             {meetings.slice(0, 5).map((meeting) => (
