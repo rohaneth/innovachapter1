@@ -45,7 +45,15 @@ const showNotification = (taskName) => {
 };
 
 const ActionItems = ({ meeting, onUpdateMeeting }) => {
-  const transcript = meeting?.transcript || '';
+  const getTranscriptString = (t) => {
+    if (typeof t === 'string') return t;
+    if (!t) return '';
+    if (typeof t === 'object') {
+      return t.text || t.transcript || JSON.stringify(t);
+    }
+    return String(t);
+  };
+  const transcript = getTranscriptString(meeting?.transcript);
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);

@@ -4,6 +4,15 @@ import { Send, MessageSquare, User, Bot } from 'lucide-react';
 const API_URL = process.env.REACT_APP_API_URL || (window.location.port === '3000' ? 'http://localhost:8000' : window.location.origin);
 
 const ChatInterface = ({ meeting, onUpdateMeeting }) => {
+  const getTranscriptString = (t) => {
+    if (typeof t === 'string') return t;
+    if (!t) return '';
+    if (typeof t === 'object') {
+      return t.text || t.transcript || JSON.stringify(t);
+    }
+    return String(t);
+  };
+  const transcript = getTranscriptString(meeting?.transcript);
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
@@ -46,7 +55,7 @@ const ChatInterface = ({ meeting, onUpdateMeeting }) => {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          transcript: meeting.transcript,
+          transcript: transcript,
           message: userMessage,
         }),
       });
@@ -91,7 +100,7 @@ const ChatInterface = ({ meeting, onUpdateMeeting }) => {
         </h2>
         <div className="bg-gray-50 rounded-lg p-4 max-h-[600px] overflow-y-auto">
           <p className="text-sm text-gray-700 whitespace-pre-wrap leading-relaxed">
-            {meeting.transcript || 'No transcript available'}
+            {transcript || 'No transcript available'}
           </p>
         </div>
       </div>
