@@ -10,7 +10,7 @@ const parseJsonResponse = (text) => {
 
 const ActionItems = ({ meeting, onUpdateMeeting }) => {
   const transcript = meeting?.transcript || '';
-  const [items, setItems] = useState([]);
+  const [items, setItems] = useState([]);       // unified array: { task, priority, status, owner, deadline }
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
@@ -33,7 +33,7 @@ const ActionItems = ({ meeting, onUpdateMeeting }) => {
       });
       if (!actionRes.ok) throw new Error('Failed to fetch action items');
       const actionData = await actionRes.json();
-      const parsedActions = parseJsonResponse(actionData.action_items);
+      const parsedActions = parseJsonResponse(actionData.action_items); // array of { task, priority, status }
 
       // Fetch owner/deadline assignments
       const ownerRes = await fetch(`${API_URL}/api/owner-deadlines`, {
@@ -43,21 +43,22 @@ const ActionItems = ({ meeting, onUpdateMeeting }) => {
       });
       if (!ownerRes.ok) throw new Error('Failed to fetch owner/deadline assignments');
       const ownerData = await ownerRes.json();
-      const parsedAssignments = parseJsonResponse(ownerData.assignments);
+      const parsedAssignments = parseJsonResponse(ownerData.assignments); // array of { task, owner, deadline }
 
-      // Merge
+      // Merge: combine action items with assignments by task name
       const merged = parsedActions.map(action => {
         const assignment = parsedAssignments.find(a => a.task === action.task) || {};
         return {
           task: action.task || '—',
           priority: action.priority || '—',
-          status: action.status || 'pending',
+          status: action.status || 'pending', // default if missing
           owner: assignment.owner || '—',
           deadline: assignment.deadline || '—',
         };
       });
 
       setItems(merged);
+      // Notify parent if update callback exists
       if (onUpdateMeeting) {
         onUpdateMeeting({
           ...meeting,
@@ -71,7 +72,7 @@ const ActionItems = ({ meeting, onUpdateMeeting }) => {
     }
   };
 
-  // Load existing items or auto‑fetch on mount/change
+  // Load existing items or auto-fetch if empty on mount/change
   useEffect(() => {
     if (meeting?.actionItems && meeting.actionItems.length > 0) {
       setItems(meeting.actionItems);
@@ -95,39 +96,10 @@ const ActionItems = ({ meeting, onUpdateMeeting }) => {
     }
   };
 
-  // ─── NEW: Send email reminder ──────────────────────────────────────────────
-  const sendReminder = async (item) => {
-    // Prompt user for the recipient email address
-    const email = window.prompt('Enter the recipient email address:');
-    if (!email) return; // user cancelled
-
-    try {
-      const response = await fetch(`${API_URL}/api/send-reminder`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          email,
-          task: item.task,
-          owner: item.owner,
-          priority: item.priority,
-          status: item.status,
-          deadline: item.deadline,
-        }),
-      });
-
-      if (!response.ok) throw new Error('Failed to send reminder');
-      alert('Reminder sent successfully!');
-    } catch (err) {
-      alert(`Error sending reminder: ${err.message}`);
-    }
-  };
-  // ─────────────────────────────────────────────────────────────────────────────
-
   const renderTable = () => {
     if (!items || items.length === 0) {
       return <p>No action items extracted yet.</p>;
     }
-
     return (
       <table style={{ width: '100%', borderCollapse: 'collapse' }}>
         <thead>
@@ -138,7 +110,6 @@ const ActionItems = ({ meeting, onUpdateMeeting }) => {
             <th style={{ padding: '8px', border: '1px solid #ddd', textAlign: 'left' }}>Owner</th>
             <th style={{ padding: '8px', border: '1px solid #ddd', textAlign: 'left' }}>Deadline</th>
             <th style={{ padding: '8px', border: '1px solid #ddd', textAlign: 'left' }}>Action</th>
-            <th style={{ padding: '8px', border: '1px solid #ddd', textAlign: 'left' }}>Reminder</th>  {/* NEW */}
           </tr>
         </thead>
         <tbody>
@@ -174,22 +145,6 @@ const ActionItems = ({ meeting, onUpdateMeeting }) => {
                   }}
                 >
                   {item.status === 'pending' ? 'Mark as Done' : 'Reopen'}
-                </button>
-              </td>
-              <td style={{ padding: '8px', border: '1px solid #ddd' }}>
-                <button
-                  onClick={() => sendReminder(item)}
-                  style={{
-                    padding: '4px 12px',
-                    borderRadius: '4px',
-                    border: 'none',
-                    backgroundColor: '#10b981',
-                    color: '#fff',
-                    cursor: 'pointer',
-                    fontSize: '0.8rem'
-                  }}
-                >
-                  Send Reminder
                 </button>
               </td>
             </tr>
@@ -229,5 +184,3 @@ const ActionItems = ({ meeting, onUpdateMeeting }) => {
     </div>
   );
 };
-
-export default ActionItems;
