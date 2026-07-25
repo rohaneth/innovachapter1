@@ -9,6 +9,42 @@ const parseJsonResponse = (text) => {
   return JSON.parse(match ? match[1].trim() : trimmed);
 };
 
+const cleanWords = (str) => {
+  return (str || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, '')
+    .split(/\s+/)
+    .filter(Boolean);
+};
+
+const findBestAssignment = (actionTask, assignments) => {
+  const actionWords = cleanWords(actionTask);
+  if (actionWords.length === 0) return {};
+
+  let bestMatch = {};
+  let highestScore = 0;
+
+  for (const assignment of assignments) {
+    const assignmentWords = cleanWords(assignment.task);
+    if (assignmentWords.length === 0) continue;
+
+    // Calculate overlap of words
+    const assignmentWordSet = new Set(assignmentWords);
+    const intersection = actionWords.filter(w => assignmentWordSet.has(w));
+    
+    // Score based on word overlap ratio
+    const score = intersection.length / Math.max(actionWords.length, assignmentWords.length);
+    
+    if (score > highestScore) {
+      highestScore = score;
+      bestMatch = assignment;
+    }
+  }
+
+  // Use the match if it has at least 40% similarity, otherwise return empty
+  return highestScore >= 0.4 ? bestMatch : {};
+};
+
 // Play a nice double-tone synthesizer beep for notifications using the Web Audio API
 const playAlarmBeep = () => {
   try {
@@ -108,9 +144,9 @@ const ActionItems = ({ meeting, onUpdateMeeting }) => {
       const ownerData = await ownerRes.json();
       const parsedAssignments = parseJsonResponse(ownerData.assignments); // array of { task, owner, deadline }
 
-      // Merge: combine action items with assignments by task name
+      // Merge: combine action items with assignments by fuzzy task matching
       const merged = parsedActions.map(action => {
-        const assignment = parsedAssignments.find(a => a.task === action.task) || {};
+        const assignment = findBestAssignment(action.task, parsedAssignments);
         return {
           task: action.task || '—',
           priority: action.priority || '—',
