@@ -1,0 +1,26 @@
+# Environment & secrets
+.env
+.env.local
+.env.*.local
+
+# Python
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+
+# Node
+node_modules/
+frontend/build/
+
+# Uploads & local data
+backend/uploads/*
+!backend/uploads/.gitkeep
+
+# OS & IDE
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
