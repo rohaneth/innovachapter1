@@ -8,14 +8,13 @@ const parseJsonResponse = (text) => {
   return JSON.parse(match ? match[1].trim() : trimmed);
 };
 
-const ActionItems = ({ meeting }) => {
+const ActionItems = ({ meeting, onUpdateMeeting }) => {
   const transcript = meeting?.transcript || '';
-  const [actionItems, setActionItems] = useState(null);
-  const [assignments, setAssignments] = useState(null);
+  const [items, setItems] = useState([]);       // unified array: { task, priority, status, owner, deadline }
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
-  // Function to fetch both action items and owner/deadline assignments
+  // Fetch and merge action items and assignments
   const fetchData = async () => {
     if (!transcript || transcript.trim() === '') {
       setError('No transcript available to analyze.');
@@ -34,9 +33,7 @@ const ActionItems = ({ meeting }) => {
       });
       if (!actionRes.ok) throw new Error('Failed to fetch action items');
       const actionData = await actionRes.json();
-      // actionData.action_items is a string containing JSON array
-      const parsedActionItems = parseJsonResponse(actionData.action_items);
-      setActionItems(parsedActionItems);
+      const parsedActions = parseJsonResponse(actionData.action_items); // array of { task, priority, status }
 
       // Fetch owner/deadline assignments
       const ownerRes = await fetch(`${API_URL}/api/owner-deadlines`, {
@@ -46,10 +43,28 @@ const ActionItems = ({ meeting }) => {
       });
       if (!ownerRes.ok) throw new Error('Failed to fetch owner/deadline assignments');
       const ownerData = await ownerRes.json();
-      // ownerData.assignments is a string containing JSON array
-      const parsedAssignments = parseJsonResponse(ownerData.assignments);
-      setAssignments(parsedAssignments);
+      const parsedAssignments = parseJsonResponse(ownerData.assignments); // array of { task, owner, deadline }
 
+      // Merge: combine action items with assignments by task name
+      const merged = parsedActions.map(action => {
+        const assignment = parsedAssignments.find(a => a.task === action.task) || {};
+        return {
+          task: action.task || '—',
+          priority: action.priority || '—',
+          status: action.status || 'pending', // default if missing
+          owner: assignment.owner || '—',
+          deadline: assignment.deadline || '—',
+        };
+      });
+
+      setItems(merged);
+      // Notify parent if update callback exists
+      if (onUpdateMeeting) {
+        onUpdateMeeting({
+          ...meeting,
+          actionItems: merged
+        });
+      }
     } catch (err) {
       setError(err.message);
     } finally {
@@ -57,19 +72,33 @@ const ActionItems = ({ meeting }) => {
     }
   };
 
-  // Automatically fetch if transcript is provided on mount or change
+  // Load existing items or auto-fetch if empty on mount/change
   useEffect(() => {
-    if (transcript) {
+    if (meeting?.actionItems && meeting.actionItems.length > 0) {
+      setItems(meeting.actionItems);
+    } else if (transcript) {
       fetchData();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [transcript]);
+  }, [meeting?.id]);
 
-  // Render helper for action items
-  const renderActionItems = () => {
-    if (!actionItems) return <p>No action items extracted yet.</p>;
-    if (!Array.isArray(actionItems) || actionItems.length === 0) {
-      return <p>No action items found in the transcript.</p>;
+  // Toggle status between 'pending' and 'completed'
+  const toggleStatus = (index) => {
+    const updated = [...items];
+    const current = updated[index].status;
+    updated[index].status = current === 'pending' ? 'completed' : 'pending';
+    setItems(updated);
+    if (onUpdateMeeting) {
+      onUpdateMeeting({
+        ...meeting,
+        actionItems: updated
+      });
+    }
+  };
+
+  const renderTable = () => {
+    if (!items || items.length === 0) {
+      return <p>No action items extracted yet.</p>;
     }
     return (
       <table style={{ width: '100%', borderCollapse: 'collapse' }}>
@@ -78,42 +107,46 @@ const ActionItems = ({ meeting }) => {
             <th style={{ padding: '8px', border: '1px solid #ddd', textAlign: 'left' }}>Task</th>
             <th style={{ padding: '8px', border: '1px solid #ddd', textAlign: 'left' }}>Priority</th>
             <th style={{ padding: '8px', border: '1px solid #ddd', textAlign: 'left' }}>Status</th>
-          </tr>
-        </thead>
-        <tbody>
-          {actionItems.map((item, index) => (
-            <tr key={index}>
-              <td style={{ padding: '8px', border: '1px solid #ddd' }}>{item.task || '—'}</td>
-              <td style={{ padding: '8px', border: '1px solid #ddd' }}>{item.priority || '—'}</td>
-              <td style={{ padding: '8px', border: '1px solid #ddd' }}>{item.status || '—'}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    );
-  };
-
-  // Render helper for owner/deadline assignments
-  const renderAssignments = () => {
-    if (!assignments) return <p>No assignments extracted yet.</p>;
-    if (!Array.isArray(assignments) || assignments.length === 0) {
-      return <p>No assignments found in the transcript.</p>;
-    }
-    return (
-      <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-        <thead>
-          <tr style={{ backgroundColor: '#f2f2f2' }}>
-            <th style={{ padding: '8px', border: '1px solid #ddd', textAlign: 'left' }}>Task</th>
             <th style={{ padding: '8px', border: '1px solid #ddd', textAlign: 'left' }}>Owner</th>
             <th style={{ padding: '8px', border: '1px solid #ddd', textAlign: 'left' }}>Deadline</th>
+            <th style={{ padding: '8px', border: '1px solid #ddd', textAlign: 'left' }}>Action</th>
           </tr>
         </thead>
         <tbody>
-          {assignments.map((item, index) => (
+          {items.map((item, index) => (
             <tr key={index}>
-              <td style={{ padding: '8px', border: '1px solid #ddd' }}>{item.task || '—'}</td>
-              <td style={{ padding: '8px', border: '1px solid #ddd' }}>{item.owner || '—'}</td>
-              <td style={{ padding: '8px', border: '1px solid #ddd' }}>{item.deadline || '—'}</td>
+              <td style={{ padding: '8px', border: '1px solid #ddd' }}>{item.task}</td>
+              <td style={{ padding: '8px', border: '1px solid #ddd' }}>{item.priority}</td>
+              <td style={{ padding: '8px', border: '1px solid #ddd' }}>
+                <span style={{
+                  backgroundColor: item.status === 'completed' ? '#10b981' : '#f59e0b',
+                  color: '#fff',
+                  padding: '2px 8px',
+                  borderRadius: '12px',
+                  fontSize: '0.75rem',
+                  fontWeight: 'bold'
+                }}>
+                  {item.status}
+                </span>
+              </td>
+              <td style={{ padding: '8px', border: '1px solid #ddd' }}>{item.owner}</td>
+              <td style={{ padding: '8px', border: '1px solid #ddd' }}>{item.deadline}</td>
+              <td style={{ padding: '8px', border: '1px solid #ddd' }}>
+                <button
+                  onClick={() => toggleStatus(index)}
+                  style={{
+                    padding: '4px 12px',
+                    borderRadius: '4px',
+                    border: 'none',
+                    backgroundColor: item.status === 'pending' ? '#3b82f6' : '#6b7280',
+                    color: '#fff',
+                    cursor: 'pointer',
+                    fontSize: '0.8rem'
+                  }}
+                >
+                  {item.status === 'pending' ? 'Mark as Done' : 'Reopen'}
+                </button>
+              </td>
             </tr>
           ))}
         </tbody>
@@ -128,21 +161,15 @@ const ActionItems = ({ meeting }) => {
       {loading && <p>Loading analysis...</p>}
       {error && <p style={{ color: 'red' }}>Error: {error}</p>}
 
-      <div style={{ marginBottom: '40px' }}>
-        <h3>Action Items</h3>
-        {renderActionItems()}
-      </div>
-
-      <div>
-        <h3>Owner & Deadline Assignments</h3>
-        {renderAssignments()}
+      <div style={{ marginBottom: '20px' }}>
+        {renderTable()}
       </div>
 
       {!loading && !error && (
         <button
           onClick={fetchData}
           style={{
-            marginTop: '20px',
+            marginTop: '10px',
             padding: '10px 20px',
             backgroundColor: '#007bff',
             color: '#fff',

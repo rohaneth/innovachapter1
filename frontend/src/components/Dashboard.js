@@ -3,24 +3,44 @@ import { Calendar, Clock, User, TrendingUp, CheckCircle, Circle } from 'lucide-r
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from 'recharts';
 
 const Dashboard = ({ meetings, onMeetingSelect }) => {
-  // Calculate stats from meetings data
+  // Flatten all action items from all meetings (each meeting has actionItems array)
   const allActionItems = meetings.flatMap(meeting => meeting.actionItems || []);
-  
+
   const actionItemStats = {
     pending: allActionItems.filter(item => item.status === 'pending').length,
     completed: allActionItems.filter(item => item.status === 'completed').length,
-    in_progress: allActionItems.filter(item => item.status === 'in_progress').length
+    in_progress: allActionItems.filter(item => item.status === 'in_progress').length,
   };
 
   const pieData = [
     { name: 'Pending', value: actionItemStats.pending || 0, color: '#f59e0b' },
     { name: 'Completed', value: actionItemStats.completed || 0, color: '#10b981' },
-    { name: 'In Progress', value: actionItemStats.in_progress || 0, color: '#3b82f6' }
+    { name: 'In Progress', value: actionItemStats.in_progress || 0, color: '#3b82f6' },
   ];
 
+  const parseDeadline = (deadlineStr) => {
+    if (!deadlineStr) return new Date(8640000000000000); // Far future
+    const match = deadlineStr.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+    if (match) {
+      return new Date(match[3], match[2] - 1, match[1]);
+    }
+    const parsed = Date.parse(deadlineStr);
+    if (!isNaN(parsed)) return new Date(parsed);
+    const lower = deadlineStr.toLowerCase();
+    const today = new Date();
+    if (lower.includes('today')) return today;
+    if (lower.includes('tomorrow')) {
+      const tomorrow = new Date();
+      tomorrow.setDate(today.getDate() + 1);
+      return tomorrow;
+    }
+    return new Date(8640000000000000); // Far future
+  };
+
+  // Upcoming deadlines (pending items with a deadline)
   const upcomingDeadlines = allActionItems
-    .filter(item => item.status === 'pending' && item.deadline)
-    .sort((a, b) => new Date(a.deadline) - new Date(b.deadline))
+    .filter(item => item.status === 'pending' && item.deadline && item.deadline !== '—')
+    .sort((a, b) => parseDeadline(a.deadline) - parseDeadline(b.deadline))
     .slice(0, 10);
 
   return (
@@ -32,9 +52,7 @@ const Dashboard = ({ meetings, onMeetingSelect }) => {
             <div>
               <p className="text-sm font-medium text-gray-600">Total Action Items</p>
               <p className="text-3xl font-bold text-gray-900 mt-2">
-                {actionItemStats.pending + 
-                 actionItemStats.completed + 
-                 actionItemStats.in_progress}
+                {allActionItems.length}
               </p>
             </div>
             <div className="bg-blue-100 p-3 rounded-full">
@@ -105,10 +123,10 @@ const Dashboard = ({ meetings, onMeetingSelect }) => {
             <p className="text-gray-500 text-center py-8">No upcoming deadlines</p>
           ) : (
             <div className="space-y-3">
-              {upcomingDeadlines.map((item) => (
-                <div key={item.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+              {upcomingDeadlines.map((item, idx) => (
+                <div key={idx} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
                   <div className="flex-1">
-                    <p className="font-medium text-gray-900">{item.description}</p>
+                    <p className="font-medium text-gray-900">{item.task}</p>
                     <div className="flex items-center mt-1 text-sm text-gray-600">
                       <User className="w-4 h-4 mr-1" />
                       {item.owner}
@@ -116,7 +134,7 @@ const Dashboard = ({ meetings, onMeetingSelect }) => {
                   </div>
                   <div className="flex items-center text-sm text-gray-600">
                     <Calendar className="w-4 h-4 mr-1" />
-                    {new Date(item.deadline).toLocaleDateString()}
+                    {item.deadline}
                   </div>
                 </div>
               ))}

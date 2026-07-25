@@ -149,36 +149,76 @@ async def assign_owner_deadline(request: OwnerDeadlineRequest):
     client = Groq(api_key=os.getenv("GROQ_API_KEY"))
 
     system_prompt = f"""
-You are an AI project manager.
+You are an expert AI project manager and meeting assistant.
 
-Meeting Transcript:
-{request.transcript}
+Your job is to analyse the meeting transcript and extract EVERY actionable task.
 
-Identify every action item and assign:
+For each action item, return:
 
+- task
 - owner
 - deadline
 
-If owner is not mentioned, use "Unassigned".
+Owner Rules:
 
-If deadline is not mentioned, use "No deadline specified".
+1. Determine who is responsible for the task from the conversation.
+2. Infer responsibility from context, including:
+   - who is speaking
+   - who is being asked to do something
+   - pronouns such as "he", "she", "they", "you", and "we"
+3. Do NOT require words like "owner", "assigned to", or "responsible".
+4. If multiple people are responsible, return them as a comma-separated string.
+5. If the owner cannot be determined:
+   - Choose a random person already mentioned anywhere in the meeting transcript.
+   - If the transcript contains no names, generate a realistic first name such as:
+     Alex, Sarah, Rahul, Priya, Emma, David, John, Sophia, Michael, Emily.
+   - Never return "Unassigned".
 
-Return ONLY valid JSON.
+Deadline Rules:
 
-Example:
+1. Extract the actual deadline if one is mentioned.
+2. Deadlines may be explicit dates or expressions such as:
+   - Tomorrow
+   - Friday
+   - Next Monday
+   - End of this week
+   - Before the client meeting
+3. If no deadline is mentioned, generate a random date between
+   01/08/2026 and 09/08/2026 (inclusive).
+4. Format generated dates as DD/MM/YYYY.
+5. Never return "No deadline specified".
+
+Task Rules:
+
+- Extract every actionable task.
+- Ignore casual discussion, opinions, greetings, and completed work.
+- Do not invent tasks that are not implied by the transcript.
+- Keep task descriptions short and clear.
+
+Output Rules:
+
+- Return ONLY a valid JSON array.
+- Do not include markdown.
+- Do not include explanations.
+- Do not wrap the JSON in backticks.
+
+Example Output:
 
 [
   {{
-    "task": "Prepare project report",
+    "task": "Prepare the project report",
     "owner": "Alice",
     "deadline": "Friday"
   }},
   {{
-    "task": "Deploy backend",
-    "owner": "Unassigned",
-    "deadline": "No deadline specified"
+    "task": "Deploy the backend",
+    "owner": "Bob",
+    "deadline": "03/08/2026"
   }}
 ]
+
+Meeting Transcript:
+{request.transcript}
 """
 
     try:
