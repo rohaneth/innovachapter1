@@ -6,7 +6,7 @@ import ChatInterface from './components/ChatInterface';
 import ActionItems from './components/ActionItems';
 import './App.css';
 
-const API_URL = process.env.REACT_APP_API_URL || (window.location.port === '3000' ? 'http://localhost:8000' : window.location.origin);
+
 
 function App() {
   const [activeTab, setActiveTab] = useState('dashboard');

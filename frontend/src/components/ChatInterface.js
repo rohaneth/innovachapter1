@@ -11,8 +11,8 @@ const ChatInterface = ({ meeting, onUpdateMeeting }) => {
 
   useEffect(() => {
     // Load chat history from meeting object
-    setMessages(meeting.chatHistory || []);
-  }, [meeting.id]);
+    setMessages(meeting?.chatHistory || []);
+  }, [meeting?.id, meeting?.chatHistory]);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
