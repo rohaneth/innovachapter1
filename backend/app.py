@@ -56,6 +56,11 @@ class OwnerDeadlineRequest(BaseModel):
     transcript: str
 
 
+class DecisionRequest(BaseModel):
+    transcript: str
+
+
+
 class ReminderRequest(BaseModel):
     email: str
     task: str
@@ -353,6 +358,75 @@ Meeting Transcript:
         return {
             "assignments": response.choices[0].message.content
         }
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/decisions")
+async def extract_decisions(request: DecisionRequest):
+    """
+    Extract key decisions from the meeting transcript.
+    """
+    client = Groq(api_key=os.getenv("GROQ_API_KEY"))
+
+    system_prompt = f"""
+You are an expert meeting assistant and business analyst.
+
+Meeting Transcript:
+{request.transcript}
+
+Analyse the transcript and extract EVERY key decision made during the meeting. For each decision, return a JSON object containing:
+
+- decision: clear, concise description of the decision made
+- category: category of the decision (e.g., Tech Stack, Timeline, Product Design, Strategy, Budget, Policy, Operations)
+- reasoning: brief explanation of why this decision was made or the reasoning/context behind it
+- decider: who made/proposed the decision (e.g. "CEO", "John", "Team agreement", etc.)
+
+Rules:
+- Ignore casual discussion, greetings, small talk, and open questions (only extract actual decisions).
+- Keep descriptions concise and clear.
+- Return ONLY a valid JSON array of objects, each with exactly the fields:
+  decision, category, reasoning, decider.
+- Do not include markdown, backticks, or any explanations.
+- Do not wrap the JSON in any other structure.
+
+Example Output:
+[
+  {{
+    "decision": "Use PostgreSQL for the database",
+    "category": "Tech Stack",
+    "reasoning": "Need relational mapping and solid transaction support",
+    "decider": "Tech Lead"
+  }}
+]
+"""
+
+    try:
+        response = client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=[
+                {"role": "system", "content": system_prompt}
+            ],
+            temperature=0
+        )
+
+        raw_content = response.choices[0].message.content
+        decisions = extract_json_array(raw_content)
+
+        # Normalize / guarantee every field is present and non-empty
+        normalized = []
+        for item in decisions:
+            if not isinstance(item, dict):
+                continue
+            normalized.append({
+                "decision": (item.get("decision") or "").strip() or "Untitled decision",
+                "category": (item.get("category") or "General").strip(),
+                "reasoning": (item.get("reasoning") or "No explicit reasoning provided").strip(),
+                "decider": (item.get("decider") or "Collaborative").strip(),
+            })
+
+        return {"decisions": normalized}
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

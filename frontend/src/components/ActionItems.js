@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Clock, Bell, X, Check, AlertCircle, RefreshCw, CheckSquare, Mail, ArrowLeft } from 'lucide-react';
+import { Clock, Bell, X, Check, AlertCircle, RefreshCw, CheckSquare, Mail, ArrowLeft, Gavel, Award } from 'lucide-react';
+
 
 const API_URL = process.env.REACT_APP_API_URL || (window.location.port === '3000' ? 'http://localhost:8000' : window.location.origin);
 
@@ -55,8 +56,10 @@ const ActionItems = ({ meeting, onUpdateMeeting }) => {
   };
   const transcript = getTranscriptString(meeting?.transcript);
   const [items, setItems] = useState([]);
+  const [decisions, setDecisions] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+
 
   const [openMenuIndex, setOpenMenuIndex] = useState(null);
   const [menuMode, setMenuMode] = useState('select');
@@ -81,19 +84,30 @@ const ActionItems = ({ meeting, onUpdateMeeting }) => {
     setError(null);
 
     try {
-      // Single call: the backend now returns task, priority, status, owner
-      // and deadline together for each action item, so there's no separate
-      // list to fetch and no fuzzy-matching needed to line them up.
-      const actionRes = await fetch(`${API_URL}/api/action-items`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ transcript }),
-      });
-      if (!actionRes.ok) throw new Error('Failed to fetch action items');
-      const actionData = await actionRes.json();
+      // Parallelize calls to action items and decisions endpoints
+      const [actionRes, decisionRes] = await Promise.all([
+        fetch(`${API_URL}/api/action-items`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ transcript }),
+        }),
+        fetch(`${API_URL}/api/decisions`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ transcript }),
+        })
+      ]);
 
-      // Backend returns an already-parsed array under "action_items"
+      if (!actionRes.ok) throw new Error('Failed to fetch action items');
+      if (!decisionRes.ok) throw new Error('Failed to fetch key decisions');
+
+      const [actionData, decisionData] = await Promise.all([
+        actionRes.json(),
+        decisionRes.json()
+      ]);
+
       const rawItems = Array.isArray(actionData.action_items) ? actionData.action_items : [];
+      const rawDecisions = Array.isArray(decisionData.decisions) ? decisionData.decisions : [];
 
       const merged = rawItems.map(item => ({
         task: item.task || '—',
@@ -106,11 +120,21 @@ const ActionItems = ({ meeting, onUpdateMeeting }) => {
         timerDuration: null
       }));
 
+      const normalizedDecisions = rawDecisions.map(dec => ({
+        decision: dec.decision || '—',
+        category: dec.category || 'General',
+        reasoning: dec.reasoning || 'No explicit reasoning provided',
+        decider: dec.decider || 'Collaborative'
+      }));
+
       setItems(merged);
+      setDecisions(normalizedDecisions);
+
       if (onUpdateMeeting) {
         onUpdateMeeting({
           ...meeting,
-          actionItems: merged
+          actionItems: merged,
+          keyDecisions: normalizedDecisions
         });
       }
     } catch (err) {
@@ -138,21 +162,28 @@ const ActionItems = ({ meeting, onUpdateMeeting }) => {
         }
         return item;
       });
+
+      const loadedDecisions = meeting.keyDecisions || [];
+
       if (updated) {
         setItems(nextItems);
+        setDecisions(loadedDecisions);
         if (onUpdateMeeting) {
           onUpdateMeeting({
             ...meeting,
-            actionItems: nextItems
+            actionItems: nextItems,
+            keyDecisions: loadedDecisions
           });
         }
       } else {
         setItems(meeting.actionItems);
+        setDecisions(loadedDecisions);
       }
     } else if (transcript) {
       fetchData();
     } else {
       setItems([]);
+      setDecisions([]);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [meeting?.id]);
@@ -613,16 +644,64 @@ const ActionItems = ({ meeting, onUpdateMeeting }) => {
     );
   };
 
+  const renderDecisions = () => {
+    if (!decisions || decisions.length === 0) {
+      return (
+        <div className="text-center py-8 bg-slate-50/50 rounded-xl border border-dashed border-slate-200">
+          <p className="text-slate-500 font-semibold text-sm">No key decisions extracted yet.</p>
+        </div>
+      );
+    }
+
+    return (
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        {decisions.map((dec, index) => (
+          <div
+            key={index}
+            className="flex flex-col bg-white rounded-xl border border-slate-100 p-4 shadow-sm hover:shadow-md hover:border-indigo-100 hover:scale-[1.01] transition-all duration-200 group"
+          >
+            <div className="flex items-start gap-3">
+              <div className="p-2 rounded-lg bg-indigo-50 text-indigo-600 group-hover:bg-indigo-600 group-hover:text-white transition-colors duration-200 shrink-0">
+                <Gavel className="w-4 h-4" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <h4 className="text-sm font-semibold text-slate-800 leading-snug group-hover:text-indigo-950 transition-colors break-words">
+                  {dec.decision}
+                </h4>
+              </div>
+            </div>
+
+            {dec.reasoning && (
+              <p className="mt-3 text-xs text-slate-600 bg-slate-50 rounded-lg p-2.5 leading-relaxed italic border-l-2 border-indigo-200 break-words">
+                {dec.reasoning}
+              </p>
+            )}
+
+            <div className="mt-auto pt-3 border-t border-slate-100 flex items-center justify-between gap-2 flex-wrap">
+              <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold bg-indigo-50 text-indigo-700 border border-indigo-100">
+                {dec.category}
+              </span>
+              <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-slate-500">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+                By: {dec.decider}
+              </span>
+            </div>
+          </div>
+        ))}
+      </div>
+    );
+  };
+
   return (
     <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden animate-fadeIn">
       <div className="px-6 py-5 border-b border-gray-200 bg-gray-50/50 flex flex-col sm:flex-row justify-between sm:items-center gap-4">
         <div>
           <h2 className="text-xl font-bold text-gray-900 flex items-center gap-2">
             <CheckSquare className="w-6 h-6 text-blue-600" />
-            Meeting Action Items & Assignments
+            Meeting Insights & Action Items
           </h2>
           <p className="text-sm text-gray-500 mt-1">
-            Track task priorities, owners, deadlines, and set real‑time countdown reminders.
+            Track key decisions, task priorities, owners, deadlines, and set real‑time countdown reminders.
           </p>
         </div>
         {!loading && !error && (
@@ -654,8 +733,26 @@ const ActionItems = ({ meeting, onUpdateMeeting }) => {
       )}
 
       {!loading && !error && (
-        <div className="p-2 sm:p-0">
-          {renderTable()}
+        <div className="p-6 space-y-8">
+          {/* Key Decisions Sub-panel */}
+          <div className="space-y-4">
+            <div className="flex items-center gap-2 border-b border-slate-100 pb-3">
+              <Award className="w-5 h-5 text-indigo-600" />
+              <h3 className="text-lg font-bold text-slate-900">Key Decisions Made</h3>
+            </div>
+            {renderDecisions()}
+          </div>
+
+          {/* Action Items Sub-panel */}
+          <div className="space-y-4">
+            <div className="flex items-center gap-2 border-b border-slate-100 pb-3">
+              <CheckSquare className="w-5 h-5 text-blue-600" />
+              <h3 className="text-lg font-bold text-slate-900">Tasks & Assignments</h3>
+            </div>
+            <div className="border border-gray-200 rounded-xl overflow-hidden shadow-sm bg-white">
+              {renderTable()}
+            </div>
+          </div>
         </div>
       )}
     </div>

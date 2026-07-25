@@ -4,9 +4,16 @@ from pydantic import BaseModel
 from pathlib import Path
 import os
 import shutil
+import re
+import json
+import logging
 from groq import Groq
 from datetime import datetime
 from dotenv import load_dotenv
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 # Try to load local .env file if it exists (for local development)
 env_path = Path(__file__).resolve().parent.parent.parent / ".env"
@@ -14,6 +21,7 @@ if env_path.exists():
     load_dotenv(env_path)
 
 app = FastAPI(title="Meeting Transcription App")
+
 
 # =========================================================================
 # FUTURE PRODUCTION SCALABILITY NOTE:
@@ -46,6 +54,42 @@ class ActionItemRequest(BaseModel):
 
 class OwnerDeadlineRequest(BaseModel):
     transcript: str
+
+
+class DecisionRequest(BaseModel):
+    transcript: str
+
+
+def extract_json_array(raw_text: str):
+    """
+    Robustly pull a JSON array out of an LLM response, stripping markdown
+    fences or any stray preamble/postamble text the model might add.
+    """
+    if not raw_text:
+        return []
+
+    text = raw_text.strip()
+
+    # Strip ```json ... ``` or ``` ... ``` fences if present
+    fence_match = re.search(r"```(?:json)?\s*([\s\S]*?)```", text)
+    if fence_match:
+        text = fence_match.group(1).strip()
+
+    # If there's still leading/trailing junk, grab the first [...] block
+    if not text.startswith("["):
+        bracket_match = re.search(r"\[[\s\S]*\]", text)
+        if bracket_match:
+            text = bracket_match.group(0)
+
+    try:
+        data = json.loads(text)
+        if isinstance(data, list):
+            return data
+        return []
+    except json.JSONDecodeError as e:
+        logger.error(f"Failed to parse JSON from model output: {e}\nRaw text: {raw_text}")
+        return []
+
 
 
 # API Routes
@@ -154,6 +198,75 @@ Rules:
         return {
             "action_items": response.choices[0].message.content
         }
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/decisions")
+async def extract_decisions(request: DecisionRequest):
+    """
+    Extract key decisions from the meeting transcript.
+    """
+    client = Groq(api_key=os.getenv("GROQ_API_KEY"))
+
+    system_prompt = f"""
+You are an expert meeting assistant and business analyst.
+
+Meeting Transcript:
+{request.transcript}
+
+Analyse the transcript and extract EVERY key decision made during the meeting. For each decision, return a JSON object containing:
+
+- decision: clear, concise description of the decision made
+- category: category of the decision (e.g., Tech Stack, Timeline, Product Design, Strategy, Budget, Policy, Operations)
+- reasoning: brief explanation of why this decision was made or the reasoning/context behind it
+- decider: who made/proposed the decision (e.g. "CEO", "John", "Team agreement", etc.)
+
+Rules:
+- Ignore casual discussion, greetings, small talk, and open questions (only extract actual decisions).
+- Keep descriptions concise and clear.
+- Return ONLY a valid JSON array of objects, each with exactly the fields:
+  decision, category, reasoning, decider.
+- Do not include markdown, backticks, or any explanations.
+- Do not wrap the JSON in any other structure.
+
+Example Output:
+[
+  {{
+    "decision": "Use PostgreSQL for the database",
+    "category": "Tech Stack",
+    "reasoning": "Need relational mapping and solid transaction support",
+    "decider": "Tech Lead"
+  }}
+]
+"""
+
+    try:
+        response = client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=[
+                {"role": "system", "content": system_prompt}
+            ],
+            temperature=0
+        )
+
+        raw_content = response.choices[0].message.content
+        decisions = extract_json_array(raw_content)
+
+        # Normalize / guarantee every field is present and non-empty
+        normalized = []
+        for item in decisions:
+            if not isinstance(item, dict):
+                continue
+            normalized.append({
+                "decision": (item.get("decision") or "").strip() or "Untitled decision",
+                "category": (item.get("category") or "General").strip(),
+                "reasoning": (item.get("reasoning") or "No explicit reasoning provided").strip(),
+                "decider": (item.get("decider") or "Collaborative").strip(),
+            })
+
+        return {"decisions": normalized}
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
