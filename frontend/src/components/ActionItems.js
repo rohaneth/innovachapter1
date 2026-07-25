@@ -3,12 +3,14 @@ import { Clock, Bell, X, Check, AlertCircle, RefreshCw, CheckSquare } from 'luci
 
 const API_URL = process.env.REACT_APP_API_URL || (window.location.port === '3000' ? 'http://localhost:8000' : window.location.origin);
 
+// Parse JSON safely, stripping markdown code fences if present
 const parseJsonResponse = (text) => {
   const trimmed = text.trim();
   const match = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/);
   return JSON.parse(match ? match[1].trim() : trimmed);
 };
 
+// Clean text into a set of words (lowercase, alphanumeric only)
 const cleanWords = (str) => {
   return (str || '')
     .toLowerCase()
@@ -17,73 +19,88 @@ const cleanWords = (str) => {
     .filter(Boolean);
 };
 
+// Compute similarity score between two task descriptions
+const computeSimilarity = (taskA, taskB) => {
+  const wordsA = cleanWords(taskA);
+  const wordsB = cleanWords(taskB);
+  if (wordsA.length === 0 || wordsB.length === 0) return 0;
+
+  // 1. Jaccard similarity on words
+  const setA = new Set(wordsA);
+  const setB = new Set(wordsB);
+  const intersection = new Set([...setA].filter(w => setB.has(w)));
+  const jaccard = intersection.size / (setA.size + setB.size - intersection.size || 1);
+
+  // 2. Bigram overlap (phrases)
+  const getBigrams = (arr) => arr.map((w, i) => i < arr.length - 1 ? `${w} ${arr[i + 1]}` : null).filter(Boolean);
+  const bigramsA = new Set(getBigrams(wordsA));
+  const bigramsB = new Set(getBigrams(wordsB));
+  const bigramIntersection = new Set([...bigramsA].filter(b => bigramsB.has(b)));
+  const bigramScore = bigramIntersection.size / (bigramsA.size + bigramsB.size - bigramIntersection.size || 1);
+
+  // 3. Substring detection (if one task is a substring of the other)
+  const lowerA = (taskA || '').toLowerCase();
+  const lowerB = (taskB || '').toLowerCase();
+  let substringScore = 0;
+  if (lowerA.includes(lowerB) || lowerB.includes(lowerA)) {
+    substringScore = 0.3; // bonus for containing similar text
+  }
+
+  // Combine scores (weighted)
+  return jaccard * 0.5 + bigramScore * 0.3 + substringScore * 0.2;
+};
+
+// Find best matching assignment for a given action task
 const findBestAssignment = (actionTask, assignments) => {
-  const actionWords = cleanWords(actionTask);
-  if (actionWords.length === 0) return {};
+  if (!Array.isArray(assignments)) return {};
 
   let bestMatch = {};
   let highestScore = 0;
+  const threshold = 0.25; // lowered to catch more matches
 
   for (const assignment of assignments) {
-    const assignmentWords = cleanWords(assignment.task);
-    if (assignmentWords.length === 0) continue;
-
-    // Calculate overlap of words
-    const assignmentWordSet = new Set(assignmentWords);
-    const intersection = actionWords.filter(w => assignmentWordSet.has(w));
-    
-    // Score based on word overlap ratio
-    const score = intersection.length / Math.max(actionWords.length, assignmentWords.length);
-    
+    if (!assignment || !assignment.task) continue;
+    const score = computeSimilarity(actionTask, assignment.task);
     if (score > highestScore) {
       highestScore = score;
       bestMatch = assignment;
     }
   }
 
-  // Use the match if it has at least 40% similarity, otherwise return empty
-  return highestScore >= 0.4 ? bestMatch : {};
+  return highestScore >= threshold ? bestMatch : {};
 };
 
-// Play a nice double-tone synthesizer beep for notifications using the Web Audio API
+// Play a nice double-tone synthesizer beep
 const playAlarmBeep = () => {
   try {
     const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-    
     const playBeep = (time, duration, frequency) => {
       const osc = audioCtx.createOscillator();
       const gain = audioCtx.createGain();
       osc.connect(gain);
       gain.connect(audioCtx.destination);
-      
       osc.type = 'sine';
       osc.frequency.setValueAtTime(frequency, time);
-      
       gain.gain.setValueAtTime(0.3, time);
       gain.gain.exponentialRampToValueAtTime(0.01, time + duration);
-      
       osc.start(time);
       osc.stop(time + duration);
     };
-
     const now = audioCtx.currentTime;
-    // Play a dual-tone chime
-    playBeep(now, 0.15, 880);      // A5
-    playBeep(now + 0.2, 0.15, 660);  // E5
-    playBeep(now + 0.4, 0.35, 1200); // D6
+    playBeep(now, 0.15, 880);
+    playBeep(now + 0.2, 0.15, 660);
+    playBeep(now + 0.4, 0.35, 1200);
   } catch (err) {
     console.error("Audio Context error:", err);
   }
 };
 
-// Request Notification permissions if needed
 const requestNotificationPermission = () => {
   if ('Notification' in window && Notification.permission === 'default') {
     Notification.requestPermission();
   }
 };
 
-// Show a desktop notification (fallback to standard alert if permission not granted)
 const showNotification = (taskName) => {
   if ('Notification' in window && Notification.permission === 'granted') {
     new Notification('Task Timer Expired', {
@@ -96,24 +113,19 @@ const showNotification = (taskName) => {
 
 const ActionItems = ({ meeting, onUpdateMeeting }) => {
   const transcript = meeting?.transcript || '';
-  const [items, setItems] = useState([]);       // unified array: { task, priority, status, owner, deadline, timerStatus, timerEnd, timerDuration }
+  const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
-  // States for the inline timer custom configuration
   const [openMenuIndex, setOpenMenuIndex] = useState(null);
   const [customMode, setCustomMode] = useState(false);
   const [customDuration, setCustomDuration] = useState({ value: '5', unit: 'min' });
-
-  // Local state representing the current time (ticks every second when timers are active)
   const [now, setNow] = useState(Date.now());
 
-  // Request notification permissions on mount
   useEffect(() => {
     requestNotificationPermission();
   }, []);
 
-  // Fetch and merge action items and assignments
   const fetchData = async () => {
     if (!transcript || transcript.trim() === '') {
       setError('No transcript available to analyze.');
@@ -132,7 +144,7 @@ const ActionItems = ({ meeting, onUpdateMeeting }) => {
       });
       if (!actionRes.ok) throw new Error('Failed to fetch action items');
       const actionData = await actionRes.json();
-      const parsedActions = parseJsonResponse(actionData.action_items); // array of { task, priority, status }
+      const parsedActions = parseJsonResponse(actionData.action_items);
 
       // Fetch owner/deadline assignments
       const ownerRes = await fetch(`${API_URL}/api/owner-deadlines`, {
@@ -142,15 +154,15 @@ const ActionItems = ({ meeting, onUpdateMeeting }) => {
       });
       if (!ownerRes.ok) throw new Error('Failed to fetch owner/deadline assignments');
       const ownerData = await ownerRes.json();
-      const parsedAssignments = parseJsonResponse(ownerData.assignments); // array of { task, owner, deadline }
+      const parsedAssignments = parseJsonResponse(ownerData.assignments);
 
-      // Merge: combine action items with assignments by fuzzy task matching
+      // Merge: for each action, find best matching assignment
       const merged = parsedActions.map(action => {
         const assignment = findBestAssignment(action.task, parsedAssignments);
         return {
           task: action.task || '—',
           priority: action.priority || '—',
-          status: action.status || 'pending', // default if missing
+          status: action.status || 'pending',
           owner: assignment.owner || '—',
           deadline: assignment.deadline || '—',
           timerStatus: 'none',
@@ -160,7 +172,6 @@ const ActionItems = ({ meeting, onUpdateMeeting }) => {
       });
 
       setItems(merged);
-      // Notify parent if update callback exists
       if (onUpdateMeeting) {
         onUpdateMeeting({
           ...meeting,
@@ -174,10 +185,9 @@ const ActionItems = ({ meeting, onUpdateMeeting }) => {
     }
   };
 
-  // Load existing items or auto-fetch if empty on mount/change
+  // Load existing items or auto-fetch
   useEffect(() => {
     if (meeting?.actionItems && meeting.actionItems.length > 0) {
-      // Check if any active timers already expired while offline/away
       const currentNow = Date.now();
       let updated = false;
       const nextItems = meeting.actionItems.map(item => {
@@ -193,7 +203,6 @@ const ActionItems = ({ meeting, onUpdateMeeting }) => {
         }
         return item;
       });
-
       if (updated) {
         setItems(nextItems);
         if (onUpdateMeeting) {
@@ -213,16 +222,13 @@ const ActionItems = ({ meeting, onUpdateMeeting }) => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [meeting?.id]);
 
-  // Global ticking interval effect to run countdown updates
+  // Global ticking interval for countdowns
   const hasActiveTimers = items.some(item => item.timerStatus === 'active' && item.timerEnd);
-
   useEffect(() => {
     if (!hasActiveTimers) return;
-
     const interval = setInterval(() => {
       const currentNow = Date.now();
       setNow(currentNow);
-
       let updated = false;
       const nextItems = items.map(item => {
         if (item.timerStatus === 'active' && item.timerEnd && currentNow >= item.timerEnd) {
@@ -237,7 +243,6 @@ const ActionItems = ({ meeting, onUpdateMeeting }) => {
         }
         return item;
       });
-
       if (updated) {
         setItems(nextItems);
         if (onUpdateMeeting) {
@@ -248,11 +253,9 @@ const ActionItems = ({ meeting, onUpdateMeeting }) => {
         }
       }
     }, 1000);
-
     return () => clearInterval(interval);
   }, [hasActiveTimers, items, meeting, onUpdateMeeting]);
 
-  // Toggle status between 'pending' and 'completed'
   const toggleStatus = (index) => {
     const updated = [...items];
     const current = updated[index].status;
@@ -266,7 +269,6 @@ const ActionItems = ({ meeting, onUpdateMeeting }) => {
     }
   };
 
-  // Start timer for a task
   const startTimer = (index, seconds) => {
     const updated = [...items];
     updated[index] = {
@@ -284,7 +286,6 @@ const ActionItems = ({ meeting, onUpdateMeeting }) => {
     }
   };
 
-  // Cancel an active timer
   const cancelTimer = (index) => {
     const updated = [...items];
     updated[index] = {
@@ -302,7 +303,6 @@ const ActionItems = ({ meeting, onUpdateMeeting }) => {
     }
   };
 
-  // Dismiss completed timer alert
   const dismissExpired = (index) => {
     const updated = [...items];
     updated[index] = {
@@ -320,14 +320,12 @@ const ActionItems = ({ meeting, onUpdateMeeting }) => {
     }
   };
 
-  // Format menu opener
   const handleOpenMenu = (index) => {
     setOpenMenuIndex(index);
     setCustomMode(false);
     setCustomDuration({ value: '5', unit: 'min' });
   };
 
-  // Priority badge styling
   const getPriorityBadgeClass = (priority) => {
     const lower = (priority || '').toLowerCase();
     if (lower.includes('high')) return 'bg-rose-50 text-rose-700 border-rose-100';
@@ -336,28 +334,22 @@ const ActionItems = ({ meeting, onUpdateMeeting }) => {
     return 'bg-gray-50 text-gray-700 border-gray-100';
   };
 
-  // Status badge styling
   const getStatusBadgeClass = (status) => {
     const lower = (status || '').toLowerCase();
     if (lower === 'completed') return 'bg-emerald-100 text-emerald-800 border-emerald-200';
     if (lower === 'in_progress') return 'bg-blue-100 text-blue-800 border-blue-200';
-    return 'bg-amber-100 text-amber-800 border-amber-200'; // pending
+    return 'bg-amber-100 text-amber-800 border-amber-200';
   };
 
-  // Format total seconds into MM:SS or HH:MM:SS
   const formatTime = (totalSeconds) => {
     const hrs = Math.floor(totalSeconds / 3600);
     const mins = Math.floor((totalSeconds % 3600) / 60);
     const secs = totalSeconds % 60;
-    
     const pad = (num) => String(num).padStart(2, '0');
-    if (hrs > 0) {
-      return `${pad(hrs)}:${pad(mins)}:${pad(secs)}`;
-    }
+    if (hrs > 0) return `${pad(hrs)}:${pad(mins)}:${pad(secs)}`;
     return `${pad(mins)}:${pad(secs)}`;
   };
 
-  // Render the Timer controls and ticking cell
   const renderReminderCell = (item, index) => {
     if (item.timerStatus === 'active' && item.timerEnd) {
       const secondsLeft = Math.max(0, Math.ceil((item.timerEnd - now) / 1000));
@@ -443,28 +435,19 @@ const ActionItems = ({ meeting, onUpdateMeeting }) => {
             ) : (
               <div className="flex items-center gap-1 w-full justify-between">
                 <button
-                  onClick={() => {
-                    startTimer(index, 30);
-                    setOpenMenuIndex(null);
-                  }}
+                  onClick={() => { startTimer(index, 30); setOpenMenuIndex(null); }}
                   className="px-1.5 py-0.5 text-[10px] font-medium bg-white hover:bg-blue-50 hover:text-blue-600 rounded border border-gray-200 transition-colors cursor-pointer"
                 >
                   30s
                 </button>
                 <button
-                  onClick={() => {
-                    startTimer(index, 60);
-                    setOpenMenuIndex(null);
-                  }}
+                  onClick={() => { startTimer(index, 60); setOpenMenuIndex(null); }}
                   className="px-1.5 py-0.5 text-[10px] font-medium bg-white hover:bg-blue-50 hover:text-blue-600 rounded border border-gray-200 transition-colors cursor-pointer"
                 >
                   1m
                 </button>
                 <button
-                  onClick={() => {
-                    startTimer(index, 300);
-                    setOpenMenuIndex(null);
-                  }}
+                  onClick={() => { startTimer(index, 300); setOpenMenuIndex(null); }}
                   className="px-1.5 py-0.5 text-[10px] font-medium bg-white hover:bg-blue-50 hover:text-blue-600 rounded border border-gray-200 transition-colors cursor-pointer"
                 >
                   5m
@@ -485,7 +468,6 @@ const ActionItems = ({ meeting, onUpdateMeeting }) => {
             )}
           </div>
         ) : null}
-        
         <button
           onClick={() => handleOpenMenu(index)}
           className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-semibold text-blue-600 hover:text-blue-800 bg-blue-50 hover:bg-blue-100 border border-blue-100 rounded-md transition-all cursor-pointer"
@@ -539,11 +521,10 @@ const ActionItems = ({ meeting, onUpdateMeeting }) => {
                 <td className="px-6 py-4 whitespace-nowrap text-right text-sm">
                   <button
                     onClick={() => toggleStatus(index)}
-                    className={`inline-flex items-center px-3 py-1.5 rounded-lg text-xs font-semibold border shadow-sm transition-all cursor-pointer ${
-                      item.status === 'pending'
-                        ? 'bg-blue-50 border-blue-200 text-blue-700 hover:bg-blue-100'
-                        : 'bg-gray-50 border-gray-200 text-gray-700 hover:bg-gray-100'
-                    }`}
+                    className={`inline-flex items-center px-3 py-1.5 rounded-lg text-xs font-semibold border shadow-sm transition-all cursor-pointer ${item.status === 'pending'
+                      ? 'bg-blue-50 border-blue-200 text-blue-700 hover:bg-blue-100'
+                      : 'bg-gray-50 border-gray-200 text-gray-700 hover:bg-gray-100'
+                      }`}
                   >
                     {item.status === 'pending' ? 'Mark as Done' : 'Reopen'}
                   </button>
@@ -558,7 +539,6 @@ const ActionItems = ({ meeting, onUpdateMeeting }) => {
 
   return (
     <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden animate-fadeIn">
-      {/* Header Area */}
       <div className="px-6 py-5 border-b border-gray-200 bg-gray-50/50 flex flex-col sm:flex-row justify-between sm:items-center gap-4">
         <div>
           <h2 className="text-xl font-bold text-gray-900 flex items-center gap-2">
@@ -566,7 +546,7 @@ const ActionItems = ({ meeting, onUpdateMeeting }) => {
             Meeting Action Items & Assignments
           </h2>
           <p className="text-sm text-gray-500 mt-1">
-            Track task priorities, owners, deadlines, and set real-time countdown reminders.
+            Track task priorities, owners, deadlines, and set real‑time countdown reminders.
           </p>
         </div>
         {!loading && !error && (
@@ -580,7 +560,6 @@ const ActionItems = ({ meeting, onUpdateMeeting }) => {
         )}
       </div>
 
-      {/* Loading & Error States */}
       {loading && (
         <div className="flex flex-col items-center justify-center py-16">
           <div className="animate-spin rounded-full h-9 w-9 border-b-2 border-blue-600"></div>
@@ -598,7 +577,6 @@ const ActionItems = ({ meeting, onUpdateMeeting }) => {
         </div>
       )}
 
-      {/* Main Table Content */}
       {!loading && !error && (
         <div className="p-2 sm:p-0">
           {renderTable()}
