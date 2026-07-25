@@ -201,6 +201,12 @@ Example:
 
 
 
+from fastapi.staticfiles import StaticFiles
+
+static_path = Path(__file__).resolve().parent / "static"
+if static_path.exists():
+    app.mount("/", StaticFiles(directory=str(static_path), html=True), name="static")
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
