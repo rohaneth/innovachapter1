@@ -1,8 +1,21 @@
-import React from 'react';
-import { Calendar, Clock, User, TrendingUp, CheckCircle, Circle } from 'lucide-react';
+import React, { useState } from 'react';
+import { Calendar, Clock, User, TrendingUp, CheckCircle, Circle, Lock, Mail, ArrowRight } from 'lucide-react';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from 'recharts';
 
+let hasLoggedInThisSession = false;
+
 const Dashboard = ({ meetings, onMeetingSelect, onUploadClick }) => {
+  const [showAuth, setShowAuth] = useState(!hasLoggedInThisSession);
+  const [fullName, setFullName] = useState('');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+
+  const handleLoginSubmit = (e) => {
+    e.preventDefault();
+    if (!fullName || !email || !password) return;
+    hasLoggedInThisSession = true;
+    setShowAuth(false);
+  };
   // Flatten all action items from all meetings (each meeting has actionItems array)
   const allActionItems = meetings.flatMap(meeting => meeting.actionItems || []);
 
@@ -42,6 +55,101 @@ const Dashboard = ({ meetings, onMeetingSelect, onUploadClick }) => {
     .filter(item => item.status === 'pending' && item.deadline && item.deadline !== '—')
     .sort((a, b) => parseDeadline(a.deadline) - parseDeadline(b.deadline))
     .slice(0, 10);
+
+  if (showAuth) {
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/95 overflow-y-auto p-4 backdrop-blur-md">
+        {/* Floating background blobs */}
+        <div className="absolute top-1/4 left-1/4 w-72 h-72 bg-blue-600/30 rounded-full blur-3xl animate-pulse"></div>
+        <div className="absolute bottom-1/4 right-1/4 w-80 h-80 bg-indigo-600/25 rounded-full blur-3xl animate-pulse delay-700"></div>
+
+        <div className="relative w-full max-w-md bg-white/10 border border-white/20 rounded-2xl shadow-2xl p-8 backdrop-blur-xl animate-fadeIn text-white">
+          <div className="text-center mb-8">
+            <div className="inline-flex items-center justify-center w-12 h-12 rounded-xl bg-gradient-to-tr from-blue-600 to-indigo-600 mb-4 shadow-lg shadow-blue-500/20">
+              <Lock className="w-5 h-5 text-white" />
+            </div>
+            <h2 className="text-2xl font-bold tracking-tight bg-gradient-to-r from-white via-slate-100 to-slate-300 bg-clip-text text-transparent">
+              Access Dashboard
+            </h2>
+            <p className="text-sm text-slate-300 mt-2">
+              Create an account or sign in to track meeting insights
+            </p>
+          </div>
+
+          <form onSubmit={handleLoginSubmit} className="space-y-4">
+            <div>
+              <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-2">
+                Full Name
+              </label>
+              <div className="relative">
+                <span className="absolute inset-y-0 left-0 flex items-center pl-3 text-slate-400">
+                  <User className="w-4 h-4" />
+                </span>
+                <input
+                  type="text"
+                  required
+                  value={fullName}
+                  onChange={(e) => setFullName(e.target.value)}
+                  placeholder="Alex Johnson"
+                  className="w-full pl-10 pr-4 py-3 bg-white/5 border border-white/10 rounded-xl text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-all placeholder-slate-500 text-white"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-2">
+                Email Address
+              </label>
+              <div className="relative">
+                <span className="absolute inset-y-0 left-0 flex items-center pl-3 text-slate-400">
+                  <Mail className="w-4 h-4" />
+                </span>
+                <input
+                  type="email"
+                  required
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="alex@company.com"
+                  className="w-full pl-10 pr-4 py-3 bg-white/5 border border-white/10 rounded-xl text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-all placeholder-slate-500 text-white"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-2">
+                Password
+              </label>
+              <div className="relative">
+                <span className="absolute inset-y-0 left-0 flex items-center pl-3 text-slate-400">
+                  <Lock className="w-4 h-4" />
+                </span>
+                <input
+                  type="password"
+                  required
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="••••••••"
+                  className="w-full pl-10 pr-4 py-3 bg-white/5 border border-white/10 rounded-xl text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-all placeholder-slate-500 text-white"
+                />
+              </div>
+            </div>
+
+            <button
+              type="submit"
+              className="w-full mt-6 py-3 px-4 flex items-center justify-center gap-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 active:scale-[0.98] text-white font-semibold rounded-xl shadow-lg shadow-blue-500/25 transition-all duration-200 cursor-pointer"
+            >
+              Continue
+              <ArrowRight className="w-4 h-4" />
+            </button>
+          </form>
+
+          <p className="text-[11px] text-slate-400 text-center mt-6">
+            Secured end-to-end. By continuing, you agree to our terms.
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
