@@ -7,6 +7,7 @@ import shutil
 import logging
 import urllib.request
 import json
+import re
 import smtplib
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
@@ -51,32 +52,66 @@ class ReminderRequest(BaseModel):
     owner: str
     priority: str
     status: str
-    deadline: str# API Routes
+    deadline: str
+
+
+def extract_json_array(raw_text: str):
+    """
+    Robustly pull a JSON array out of an LLM response, stripping markdown
+    fences or any stray preamble/postamble text the model might add.
+    """
+    if not raw_text:
+        return []
+
+    text = raw_text.strip()
+
+    # Strip ```json ... ``` or ``` ... ``` fences if present
+    fence_match = re.search(r"```(?:json)?\s*([\s\S]*?)```", text)
+    if fence_match:
+        text = fence_match.group(1).strip()
+
+    # If there's still leading/trailing junk, grab the first [...] block
+    if not text.startswith("["):
+        bracket_match = re.search(r"\[[\s\S]*\]", text)
+        if bracket_match:
+            text = bracket_match.group(0)
+
+    try:
+        data = json.loads(text)
+        if isinstance(data, list):
+            return data
+        return []
+    except json.JSONDecodeError as e:
+        logger.error(f"Failed to parse JSON from model output: {e}\nRaw text: {raw_text}")
+        return []
+
+
+# API Routes
 @app.post("/api/upload-video")
 async def upload_video(file: UploadFile = File(...), title: str = Form("")):
     # Create uploads directory if it doesn't exist
     os.makedirs("uploads", exist_ok=True)
-    
+
     # Save video file
     file_path = f"uploads/{file.filename}"
     with open(file_path, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
-    
+
     # Transcribe using Groq
     client = Groq(api_key=os.getenv("GROQ_API_KEY"))
-    
+
     try:
         with open(file_path, "rb") as video_file:
             transcription = client.audio.transcriptions.create(
                 file=video_file,
                 model="whisper-large-v3"
             )
-        
+
         transcript_text = transcription.text
-        
+
         # Delete the video file after transcription
         os.remove(file_path)
-        
+
         return {
             "title": title or file.filename,
             "transcript": transcript_text,
@@ -85,18 +120,19 @@ async def upload_video(file: UploadFile = File(...), title: str = Form("")):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+
 @app.post("/api/chat")
 async def chat_with_transcript(request: ChatRequest):
     # Get AI response from Groq
     client = Groq(api_key=os.getenv("GROQ_API_KEY"))
-    
-    system_prompt = f"""You are a helpful assistant analyzing meeting transcripts. 
+
+    system_prompt = f"""You are a helpful assistant analyzing meeting transcripts.
 Here is the meeting transcript for context:
 
 {request.transcript}
 
 Answer questions about the meeting, summarize key points, and help extract action items."""
-    
+
     try:
         response = client.chat.completions.create(
             model="llama-3.3-70b-versatile",
@@ -105,9 +141,9 @@ Answer questions about the meeting, summarize key points, and help extract actio
                 {"role": "user", "content": request.message}
             ]
         )
-        
+
         ai_response = response.choices[0].message.content
-        
+
         return {"response": ai_response}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -115,30 +151,80 @@ Answer questions about the meeting, summarize key points, and help extract actio
 
 @app.post("/api/action-items")
 async def extract_action_items(request: ActionItemRequest):
+    """
+    Single unified extraction: returns task, priority, status, owner and
+    deadline together in ONE model call. Doing owner/deadline assignment in
+    the same call as task extraction guarantees each field lines up with the
+    correct task -- there is no separate list to reconcile afterwards.
+    """
     client = Groq(api_key=os.getenv("GROQ_API_KEY"))
 
     system_prompt = f"""
-You are an expert meeting assistant.
+You are an expert AI project manager and meeting assistant.
 
 Meeting Transcript:
 {request.transcript}
 
-Extract only actionable tasks from the meeting.
+Analyse the transcript and extract EVERY actionable task discussed. For each
+action item, return a single JSON object containing ALL of the following
+fields together:
 
-Return the result in this JSON format:
+- task: short, clear description of the actionable task
+- priority: "High", "Medium", or "Low"
+- status: always "Pending" (unless the transcript explicitly says it is already done, then "Completed")
+- owner: who is responsible for the task
+- deadline: when the task is due
 
+Owner Rules:
+1. Determine who is responsible for the task from the conversation.
+2. Infer responsibility from context, including who is speaking, who is
+   being asked to do something, and pronouns such as "he", "she", "they",
+   "you", and "we".
+3. Do NOT require explicit words like "owner", "assigned to", or "responsible".
+4. If multiple people are responsible, return them as a comma-separated string.
+5. If the owner truly cannot be determined:
+   - Choose a person already mentioned anywhere in the meeting transcript.
+   - If the transcript contains no names, generate a realistic first name such as:
+     Alex, Sarah, Rahul, Priya, Emma, David, John, Sophia, Michael, Emily.
+   - Never return "Unassigned" or an empty string.
+
+Deadline Rules:
+1. Extract the actual deadline if one is mentioned (explicit date, or
+   expressions such as "tomorrow", "Friday", "next Monday", "end of this week",
+   "before the client meeting").
+2. If no deadline is mentioned, generate a plausible date between
+   01/08/2026 and 09/08/2026 (inclusive), formatted as DD/MM/YYYY.
+3. Never return "No deadline specified" or an empty string.
+
+Task Rules:
+- Extract every actionable task.
+- Ignore casual discussion, opinions, greetings, and completed small talk.
+- Do not invent tasks that are not implied by the transcript.
+- Keep task descriptions short and clear.
+
+Output Rules:
+- Return ONLY a valid JSON array of objects, each with exactly the fields:
+  task, priority, status, owner, deadline.
+- Do not include markdown, backticks, or any explanations.
+- Do not wrap the JSON in any other structure.
+
+Example Output:
 [
   {{
-    "task": "Task description",
-    "priority": "High/Medium/Low",
-    "status": "Pending"
+    "task": "Prepare the project report",
+    "priority": "High",
+    "status": "Pending",
+    "owner": "Alice",
+    "deadline": "Friday"
+  }},
+  {{
+    "task": "Deploy the backend",
+    "priority": "Medium",
+    "status": "Pending",
+    "owner": "Bob",
+    "deadline": "03/08/2026"
   }}
 ]
-
-Rules:
-- Ignore discussions that are not action items.
-- Do not include explanations.
-- Return valid JSON only.
 """
 
     try:
@@ -150,9 +236,23 @@ Rules:
             temperature=0
         )
 
-        return {
-            "action_items": response.choices[0].message.content
-        }
+        raw_content = response.choices[0].message.content
+        items = extract_json_array(raw_content)
+
+        # Normalize / guarantee every field is present and non-empty
+        normalized = []
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            normalized.append({
+                "task": (item.get("task") or "").strip() or "Untitled task",
+                "priority": (item.get("priority") or "Medium").strip(),
+                "status": (item.get("status") or "Pending").strip(),
+                "owner": (item.get("owner") or "Unassigned").strip(),
+                "deadline": (item.get("deadline") or "TBD").strip(),
+            })
+
+        return {"action_items": normalized}
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -160,6 +260,12 @@ Rules:
 
 @app.post("/api/owner-deadlines")
 async def assign_owner_deadline(request: OwnerDeadlineRequest):
+    """
+    Kept for backwards compatibility with any other callers, but the
+    /api/action-items endpoint above now returns owner + deadline directly
+    and should be preferred -- it avoids the need to reconcile two
+    independently generated lists.
+    """
     client = Groq(api_key=os.getenv("GROQ_API_KEY"))
 
     system_prompt = f"""
@@ -216,21 +322,6 @@ Output Rules:
 - Do not include explanations.
 - Do not wrap the JSON in backticks.
 
-Example Output:
-
-[
-  {{
-    "task": "Prepare the project report",
-    "owner": "Alice",
-    "deadline": "Friday"
-  }},
-  {{
-    "task": "Deploy the backend",
-    "owner": "Bob",
-    "deadline": "03/08/2026"
-  }}
-]
-
 Meeting Transcript:
 {request.transcript}
 """
@@ -261,13 +352,13 @@ async def send_reminder(request: ReminderRequest):
         raise HTTPException(status_code=400, detail="Task description cannot be empty")
     if not request.owner.strip():
         raise HTTPException(status_code=400, detail="Owner name cannot be empty")
-    
+
     # 2. Compose professional email contents
     subject = f"Meeting Action Item Reminder: {request.task[:50]}" + ("..." if len(request.task) > 50 else "")
-    
+
     priority_lower = request.priority.strip().lower()
     status_lower = request.status.strip().lower()
-    
+
     html_content = f"""<!DOCTYPE html>
 <html>
 <head>
@@ -353,7 +444,7 @@ async def send_reminder(request: ReminderRequest):
         .badge-low {{ background-color: #e0f2fe; color: #075985; }}
         .badge-pending {{ background-color: #ffedd5; color: #9a3412; }}
         .badge-completed {{ background-color: #d1fae5; color: #065f46; }}
-        
+
         .footer {{
             background-color: #f9fafb;
             padding: 20px;
@@ -420,7 +511,7 @@ async def send_reminder(request: ReminderRequest):
     # 3. Email dispatch configuration checks
     sendgrid_key = os.getenv("SENDGRID_API_KEY")
     sendgrid_from = os.getenv("SENDGRID_FROM_EMAIL")
-    
+
     smtp_server = os.getenv("SMTP_SERVER")
     smtp_port_str = os.getenv("SMTP_PORT")
     smtp_username = os.getenv("SMTP_USERNAME")
@@ -486,27 +577,27 @@ async def send_reminder(request: ReminderRequest):
                     smtp_port = int(smtp_port_str) if smtp_port_str else 587
                 except ValueError:
                     smtp_port = 587
-                
+
                 msg = MIMEMultipart("alternative")
                 msg["Subject"] = subject
                 msg["From"] = sender_email
                 msg["To"] = request.email
-                
+
                 part1 = MIMEText(text_content, "plain")
                 part2 = MIMEText(html_content, "html")
                 msg.attach(part1)
                 msg.attach(part2)
-                
+
                 if smtp_port == 465:
                     server = smtplib.SMTP_SSL(smtp_server, smtp_port, timeout=10)
                 else:
                     server = smtplib.SMTP(smtp_server, smtp_port, timeout=10)
                     server.starttls()
-                    
+
                 server.login(smtp_username, smtp_password)
                 server.sendmail(sender_email, request.email, msg.as_string())
                 server.quit()
-                
+
                 email_sent = True
                 logger.info(f"Email successfully sent to {request.email} via SMTP.")
             except Exception as e:
@@ -536,9 +627,6 @@ async def send_reminder(request: ReminderRequest):
                 "errors": errors
             }
         )
-
-
-
 
 
 from fastapi.staticfiles import StaticFiles

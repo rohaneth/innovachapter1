@@ -3,73 +3,6 @@ import { Clock, Bell, X, Check, AlertCircle, RefreshCw, CheckSquare } from 'luci
 
 const API_URL = process.env.REACT_APP_API_URL || (window.location.port === '3000' ? 'http://localhost:8000' : window.location.origin);
 
-// Parse JSON safely, stripping markdown code fences if present
-const parseJsonResponse = (text) => {
-  const trimmed = text.trim();
-  const match = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/);
-  return JSON.parse(match ? match[1].trim() : trimmed);
-};
-
-// Clean text into a set of words (lowercase, alphanumeric only)
-const cleanWords = (str) => {
-  return (str || '')
-    .toLowerCase()
-    .replace(/[^a-z0-9\s]/g, '')
-    .split(/\s+/)
-    .filter(Boolean);
-};
-
-// Compute similarity score between two task descriptions
-const computeSimilarity = (taskA, taskB) => {
-  const wordsA = cleanWords(taskA);
-  const wordsB = cleanWords(taskB);
-  if (wordsA.length === 0 || wordsB.length === 0) return 0;
-
-  // 1. Jaccard similarity on words
-  const setA = new Set(wordsA);
-  const setB = new Set(wordsB);
-  const intersection = new Set([...setA].filter(w => setB.has(w)));
-  const jaccard = intersection.size / (setA.size + setB.size - intersection.size || 1);
-
-  // 2. Bigram overlap (phrases)
-  const getBigrams = (arr) => arr.map((w, i) => i < arr.length - 1 ? `${w} ${arr[i + 1]}` : null).filter(Boolean);
-  const bigramsA = new Set(getBigrams(wordsA));
-  const bigramsB = new Set(getBigrams(wordsB));
-  const bigramIntersection = new Set([...bigramsA].filter(b => bigramsB.has(b)));
-  const bigramScore = bigramIntersection.size / (bigramsA.size + bigramsB.size - bigramIntersection.size || 1);
-
-  // 3. Substring detection (if one task is a substring of the other)
-  const lowerA = (taskA || '').toLowerCase();
-  const lowerB = (taskB || '').toLowerCase();
-  let substringScore = 0;
-  if (lowerA.includes(lowerB) || lowerB.includes(lowerA)) {
-    substringScore = 0.3; // bonus for containing similar text
-  }
-
-  // Combine scores (weighted)
-  return jaccard * 0.5 + bigramScore * 0.3 + substringScore * 0.2;
-};
-
-// Find best matching assignment for a given action task
-const findBestAssignment = (actionTask, assignments) => {
-  if (!Array.isArray(assignments)) return {};
-
-  let bestMatch = {};
-  let highestScore = 0;
-  const threshold = 0.25; // lowered to catch more matches
-
-  for (const assignment of assignments) {
-    if (!assignment || !assignment.task) continue;
-    const score = computeSimilarity(actionTask, assignment.task);
-    if (score > highestScore) {
-      highestScore = score;
-      bestMatch = assignment;
-    }
-  }
-
-  return highestScore >= threshold ? bestMatch : {};
-};
-
 // Play a nice double-tone synthesizer beep
 const playAlarmBeep = () => {
   try {
@@ -136,7 +69,9 @@ const ActionItems = ({ meeting, onUpdateMeeting }) => {
     setError(null);
 
     try {
-      // Fetch action items
+      // Single call: the backend now returns task, priority, status, owner
+      // and deadline together for each action item, so there's no separate
+      // list to fetch and no fuzzy-matching needed to line them up.
       const actionRes = await fetch(`${API_URL}/api/action-items`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -144,32 +79,20 @@ const ActionItems = ({ meeting, onUpdateMeeting }) => {
       });
       if (!actionRes.ok) throw new Error('Failed to fetch action items');
       const actionData = await actionRes.json();
-      const parsedActions = parseJsonResponse(actionData.action_items);
 
-      // Fetch owner/deadline assignments
-      const ownerRes = await fetch(`${API_URL}/api/owner-deadlines`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ transcript }),
-      });
-      if (!ownerRes.ok) throw new Error('Failed to fetch owner/deadline assignments');
-      const ownerData = await ownerRes.json();
-      const parsedAssignments = parseJsonResponse(ownerData.assignments);
+      // Backend returns an already-parsed array under "action_items"
+      const rawItems = Array.isArray(actionData.action_items) ? actionData.action_items : [];
 
-      // Merge: for each action, find best matching assignment
-      const merged = parsedActions.map(action => {
-        const assignment = findBestAssignment(action.task, parsedAssignments);
-        return {
-          task: action.task || '—',
-          priority: action.priority || '—',
-          status: action.status || 'pending',
-          owner: assignment.owner || '—',
-          deadline: assignment.deadline || '—',
-          timerStatus: 'none',
-          timerEnd: null,
-          timerDuration: null
-        };
-      });
+      const merged = rawItems.map(item => ({
+        task: item.task || '—',
+        priority: item.priority || '—',
+        status: (item.status || 'Pending').toLowerCase(),
+        owner: item.owner || '—',
+        deadline: item.deadline || '—',
+        timerStatus: 'none',
+        timerEnd: null,
+        timerDuration: null
+      }));
 
       setItems(merged);
       if (onUpdateMeeting) {
