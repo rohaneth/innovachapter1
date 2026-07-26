@@ -1,202 +1,242 @@
-# Meeting Transcription & Task Management App
+# 🎙️ MeetFlow AI — AI Meeting & Follow-Up Agent
 
-A full-stack application for meeting video transcription, AI-powered chat, and action item management.
+> **Hackathon Track:** AI Meeting & Follow-Up Agent (Problem Statement 2)
+> An autonomous agent that turns raw meeting recordings into tracked decisions, assigned action items, and self-driven follow-up reminders — so nothing said in a meeting is ever forgotten.
 
-## Features
+---
 
-- **Video Upload & Transcription**: Upload meeting videos and get automatic AI-powered transcription
-- **AI Chat Interface**: Chat with your meeting transcript using AI to extract insights
-- **Action Item Management**: Create, assign, and track action items with deadlines
-- **Dashboard**: Visual overview of pending vs completed tasks with analytics
-- **Easy Deployment**: One-command deployment using Docker Compose
-- **No Database**: All data stored in browser localStorage - no server-side persistence
+## 🧩 Problem We're Solving
 
-## Tech Stack
+Meetings generate decisions and action items constantly, but the moment the call ends, most of it evaporates. No one is fully sure who owes what, by when — and follow-ups only happen if someone manually chases people down.
+
+**MeetFlow AI** closes that gap end-to-end: upload a recording → get a transcript → extract decisions and action items → auto-assign owners and deadlines → send automated reminders until each task is marked done — all visible on a live dashboard.
+
+---
+
+## 💡 Our Solution
+
+MeetFlow AI is a full-stack, AI-powered agent pipeline that directly mirrors every focus area in the problem statement:
+
+| Problem Statement Focus Area | How MeetFlow AI Delivers It |
+|---|---|
+| Transcript / action-item extraction | Groq Whisper-large-v3 transcribes meeting video/audio; Llama-3.3-70b-versatile extracts action items in a single structured LLM pass |
+| Owner & deadline assignment | The same extraction pass infers the most plausible owner, priority (High/Medium/Low), and a realistic deadline per task |
+| Automated reminder / follow-up loop | Live countdown timers per task + one-click / autonomous professional HTML email reminders via SendGrid or SMTP, re-triggerable until completion |
+| Simple dashboard of pending vs. completed items | React + Recharts analytics dashboard shows pending vs. completed items, priorities, and per-meeting breakdowns at a glance |
+| (Bonus) Decision tracking | A dedicated decisions engine catalogs *what* was decided, *why*, and *by whom* — not just tasks, but the reasoning behind them |
+| (Bonus) Ask-your-meeting chat | Chat directly with any transcript to clarify context without re-watching the recording |
+
+---
+
+## ✨ Key Features
+
+- 🎥 **Video Ingestion & Transcription** — Upload a recording, get a precise transcript via **Groq Whisper-large-v3**.
+- 📋 **Unified Action-Item Extraction** — Tasks, owners, priority, and deadlines generated in one aligned AI call (no drift between fields).
+- 🧠 **Key Decision Archiving** — Captures category, decider, and reasoning for every decision made in the meeting.
+- ⏱️ **Live Countdown Reminders** — Real-time deadline countdowns embedded directly in the Action Items dashboard.
+- ✉️ **Autonomous Follow-Ups** — Professional HTML reminder emails sent via SendGrid or SMTP fallback, so tasks get chased automatically instead of manually.
+- 💬 **Interactive AI Chat** — Ask the transcript questions directly using **Llama-3.3-70b-versatile**.
+- 📊 **Pending vs. Completed Dashboard** — At-a-glance analytics across all meetings.
+- ⚡ **Stateless, Serverless-Ready Backend** — No database dependency; deploys instantly to Vercel.
+
+---
+
+## 🚀 Why This Stands Out (Innovation & Differentiation)
+
+- **Single aligned LLM call** for owner + priority + deadline extraction, avoiding the inconsistency that comes from separate prompts/models per field.
+- **Decisions as first-class data**, not just action items — most competing tools only extract tasks, losing the "why" behind a decision.
+- **Reminder loop is autonomous, not a static list** — countdowns and emails actively push follow-through instead of relying on someone remembering to check a board.
+- **Zero-database, serverless-first architecture** — trivially cheap to run and deploy, making it realistic for small teams to actually adopt post-hackathon.
+
+---
+
+## 🛠️ Tech Stack
 
 ### Backend
-- FastAPI (Python)
-- Groq API (Whisper for transcription, Llama for chat)
-- Uvicorn server
-- Stateless architecture (no database)
+- **FastAPI** (Python 3) — async, high-performance API layer
+- **Groq SDK** — Whisper-large-v3 (transcription) + Llama-3.3-70b-versatile (chat, extraction)
+- **SendGrid Web API** with **SMTP fallback** (e.g., Gmail App Password) for reminder emails
+- **Stateless design** — no backend database required
 
 ### Frontend
-- React 18
-- TailwindCSS
-- Lucide React (icons)
-- Recharts (charts)
-- localStorage for data persistence
+- **React 18** (functional components)
+- **TailwindCSS** for responsive UI
+- **Lucide React** for icons
+- **Recharts** for the analytics dashboard
+- **Browser `localStorage`** for lightweight client-side persistence
 
-## Prerequisites
+### Infra / Deployment
+- **Docker Compose** for local multi-container orchestration
+- **Vercel** — serverless deployment (frontend static hosting + backend as Serverless Functions)
+- One-click `deploy.bat` / `deploy.sh` scripts for judges to spin up the demo fast
 
-- Docker and Docker Compose installed
-- Groq API key (get one at https://console.groq.com/)
+---
 
-## Quick Start (Docker Deployment)
+## 🏗️ Architecture Overview
 
-### 1. Set up environment variables
-
-Create a `.env` file in the root directory:
-
-```bash
-# Groq API Configuration
-GROQ_API_KEY=your_groq_api_key_here
-REACT_APP_API_URL=http://localhost:8000
-
-# Optional: Email Reminder Configuration (SendGrid)
-SENDGRID_API_KEY=your_sendgrid_key
-SENDGRID_FROM_EMAIL=sender@yourdomain.com
-
-# Optional: Email Reminder Configuration (SMTP fallback)
-SMTP_SERVER=smtp.gmail.com
-SMTP_PORT=587
-SMTP_USERNAME=your_email@gmail.com
-SMTP_PASSWORD=your_app_password
-SMTP_SENDER=your_email@gmail.com
+```
+Meeting Recording
+      │
+      ▼
+[Groq Whisper-large-v3] ──► Transcript
+      │
+      ▼
+[Llama-3.3-70b-versatile]
+  ├──► Action Items (owner, priority, deadline)
+  ├──► Key Decisions (category, decider, reasoning)
+  └──► Conversational Chat (ask the transcript anything)
+      │
+      ▼
+[React Dashboard] ──► Pending vs. Completed, countdowns, charts
+      │
+      ▼
+[SendGrid / SMTP] ──► Automated reminder emails until task is marked complete
 ```
 
-### 2. Deploy with one command
+---
 
+## 📋 Prerequisites
+
+- [Docker Desktop](https://www.docker.com/products/docker-desktop) installed and running
+- A **Groq API Key** — free at the [Groq Console](https://console.groq.com/)
+- *(Optional)* **SendGrid API Key** or an **SMTP-enabled email account** (e.g., Gmail App Password) for testing reminders
+
+---
+
+## 🚀 Getting Started
+
+### Option A: Quick Start (One-Click)
+- **Windows**: run `.\deploy.bat`
+- **Mac/Linux**:
+  ```bash
+  chmod +x deploy.sh
+  ./deploy.sh
+  ```
+
+### Option B: Docker Compose
+1. Create a `.env` file (see `.env.example`):
+   ```env
+   # Required
+   GROQ_API_KEY=your_groq_api_key_here
+   REACT_APP_API_URL=http://localhost:8000
+
+   # Optional: SendGrid
+   SENDGRID_API_KEY=your_sendgrid_key
+   SENDGRID_FROM_EMAIL=sender@yourdomain.com
+
+   # Optional: SMTP fallback
+   SMTP_SERVER=smtp.gmail.com
+   SMTP_PORT=587
+   SMTP_USERNAME=your_email@gmail.com
+   SMTP_PASSWORD=your_app_password
+   SMTP_SENDER=your_email@gmail.com
+   ```
+2. Build and start:
+   ```bash
+   docker-compose up --build
+   ```
+3. Access:
+   - Frontend → http://localhost
+   - Backend API → http://localhost:8000
+   - Swagger Docs → http://localhost:8000/docs
+
+### Option C: Manual Dev Setup
 ```bash
-docker-compose up --build
-```
-
-That's it! The application will be available at:
-- Frontend: http://localhost
-- Backend API: http://localhost:8000
-- API Documentation: http://localhost:8000/docs
-
-## Manual Development Setup
-
-### Backend Setup
-
-1. Navigate to backend directory:
-```bash
+# Backend
 cd backend
-```
-
-2. Create virtual environment:
-```bash
 python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-```
-
-3. Install dependencies:
-```bash
+source venv/bin/activate  # Windows: venv\Scripts\activate
 pip install -r requirements.txt
-```
+python app.py   # runs on http://localhost:8000
 
-4. Set environment variable:
-```bash
-export GROQ_API_KEY=your_key_here  # On Windows: set GROQ_API_KEY=your_key_here
-```
-
-5. Run backend:
-```bash
-python app.py
-```
-
-Backend will run on http://localhost:8000
-
-### Frontend Setup
-
-1. Navigate to frontend directory:
-```bash
+# Frontend (new terminal)
 cd frontend
-```
-
-2. Install dependencies:
-```bash
 npm install
+npm start        # runs on http://localhost:3000
 ```
 
-3. Set environment variable:
-```bash
-export REACT_APP_API_URL=http://localhost:8000  # On Windows: set REACT_APP_API_URL=http://localhost:8000
+### Option D: Vercel Serverless Deployment
+Fully pre-configured for a unified single-repo Vercel deploy:
+- Frontend served via static hosting / Nginx
+- Backend mapped to Serverless Functions via `frontend/api/index.py` and `frontend/vercel.json`
+- Add `GROQ_API_KEY` (and email provider keys) in Vercel project settings
+
+---
+
+## 📡 API Endpoints
+
+| Method | Endpoint | Description |
+|---|---|---|
+| `POST` | `/api/upload-video` | Uploads a video, transcribes via Whisper-large-v3, returns transcript text |
+| `POST` | `/api/chat` | Chat with a meeting transcript via Llama-3.3-70b-versatile |
+| `POST` | `/api/action-items` | Extracts tasks, owners, priorities, deadlines from a transcript in one AI pass |
+| `POST` | `/api/decisions` | Extracts key decisions, categories, reasoning, and deciders |
+| `POST` | `/api/send-reminder` | Sends a professional HTML reminder email via SendGrid or SMTP fallback (falls back to console log if no credentials set) |
+
+Example `send-reminder` payload:
+```json
+{
+  "email": "recipient@domain.com",
+  "task": "Task description details",
+  "owner": "Assignee Name",
+  "priority": "High",
+  "status": "Pending",
+  "deadline": "31/12/2026"
+}
 ```
 
-4. Run frontend:
-```bash
-npm start
-```
+---
 
-Frontend will run on http://localhost:3000
-
-## Usage
-
-1. **Upload Video**: Go to "Upload Video" tab and upload a meeting video file
-2. **View Transcript**: After upload, you'll be redirected to the chat interface with the transcript
-3. **Chat with AI**: Ask questions about the meeting content
-4. **Manage Action Items**: Go to "Action Items" tab to create and assign tasks
-5. **View Dashboard**: Check the dashboard for analytics and task overview
-
-**Note**: All data (meetings, transcripts, action items, chat history) is stored in your browser's localStorage. Clearing browser data will remove all stored information.
-
-## API Endpoints
-
-### Video & Transcription
-- `POST /api/upload-video` - Upload and transcribe video (returns transcript)
-
-### Chat
-- `POST /api/chat` - Send chat message with transcript context (requires transcript and message in body)
-
-## Project Structure
+## 📁 Project Structure
 
 ```
 freshinnova/
 ├── backend/
-│   ├── app.py              # FastAPI application (stateless)
-│   ├── requirements.txt    # Python dependencies
-│   ├── Dockerfile          # Backend Docker config
-│   └── uploads/            # Temporary video storage
+│   ├── app.py              # Main FastAPI application
+│   ├── requirements.txt
+│   ├── Dockerfile
+│   └── uploads/             # Temporary video processing dir
 ├── frontend/
+│   ├── api/index.py         # Vercel Serverless Function entry point
 │   ├── src/
-│   │   ├── components/     # React components
-│   │   ├── App.js          # Main app component with localStorage
-│   │   └── index.js        # Entry point
-│   ├── public/             # Static files
-│   ├── package.json        # Node dependencies
-│   ├── Dockerfile          # Frontend Docker config
-│   └── nginx.conf          # Nginx configuration
-├── docker-compose.yml      # Docker Compose configuration
-└── .env                    # Environment variables
+│   │   ├── components/
+│   │   │   ├── ActionItems.js   # Task dashboard, decisions, countdowns
+│   │   │   ├── ChatInterface.js # Transcript-bound AI chat
+│   │   │   ├── Dashboard.js     # Analytics charts & meeting selector
+│   │   │   └── VideoUpload.js   # Video upload UI
+│   │   ├── App.js
+│   │   └── index.js
+│   ├── public/
+│   ├── vercel.json
+│   ├── Dockerfile
+│   └── nginx.conf
+├── deploy.bat
+├── deploy.sh
+├── docker-compose.yml
+└── .env
 ```
 
-## Troubleshooting
+---
 
-### Docker Issues
-- If ports are already in use, change them in `docker-compose.yml`
-- Check Docker logs: `docker-compose logs`
+## 📈 Scalability & Real-World Impact
 
-### API Key Issues
-- Ensure your Groq API key is valid and has sufficient credits
-- Check that the API key is properly set in `.env` file
+- **Stateless backend** means horizontal scaling is trivial — spin up more serverless instances with zero session/data migration concerns.
+- **Provider-agnostic email layer** (SendGrid + SMTP fallback) means it works for solo users and enterprise teams alike.
+- **Any team that runs recurring meetings** (product, sales, ops, client calls) can adopt this immediately to cut down on missed follow-ups and "who owns this?" confusion.
+- Natural extensions: Slack/Teams notifications, calendar integration for deadline sync, multi-language transcription, and a persistent database for cross-meeting analytics at scale.
 
-### Frontend Issues
-- Clear browser cache if UI doesn't update
-- Check browser console for errors
-- Ensure `REACT_APP_API_URL` is set correctly
-- If data disappears, check that localStorage is enabled in your browser
+---
 
-### Data Persistence
-- All data is stored in browser localStorage
-- Clearing browser data will remove all meetings and action items
-- Data is not shared between different browsers or devices
-- For production use, consider implementing a backend database
+## 🎯 Roadmap (Post-Hackathon)
 
-## Production Deployment
+- [ ] Slack / Microsoft Teams reminder delivery
+- [ ] Calendar sync for deadlines
+- [ ] Persistent database + multi-user auth
+- [ ] Recurring/escalating reminder cadence (not just one-shot)
+- [ ] Meeting-to-meeting trend analytics (who's overdue most often, decision velocity, etc.)
 
-For production deployment:
+---
 
-1. **Update environment variables in production:** Ensure Groq, SendGrid/SMTP credentials are fully configured.
-2. **Enable HTTPS:** Secures authentication headers and data transit.
-3. **Configure nginx for production:** If self-hosting using Docker.
-4. **Add authentication/authorization:** Restrict access to authorized meeting members.
-5. **Consider database persistence:** Port local storage to standard PostgreSQL/MongoDB databases.
-6. **Vercel Serverless Function Deployment:** 
-   - The project is fully pre-configured to run out of the box on Vercel. 
-   - The frontend uses `/api/index.py` serverless functions for zero-configuration backend scalability, automatically routed via `frontend/vercel.json`.
-   - Setup project on Vercel and attach your environment variables to host instantly.
+## 🛡️ License
 
-## License
-
-MIT
+Licensed under the MIT License — free to customize and extend for your organization.
